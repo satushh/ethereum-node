@@ -2,22 +2,25 @@ module github.com/satushh/ethereum-node
 
 go 1.26.5
 
-// The two clients are composed from local clones. The go-ethereum clone is
-// checked out at exactly the tag Prysm's go.mod requires (v1.17.4) so the
-// version linked into the binary is the version Prysm's imports were built
-// against.
-replace github.com/ethereum/go-ethereum => ../go-ethereum
-
-replace github.com/OffchainLabs/prysm/v7 => ../prysm
-
+// Both clients come from the Go module proxy as ordinary pinned versions:
+// prysm at a develop pseudo-version, go-ethereum at exactly the version that
+// prysm commit requires (one binary links one go-ethereum, and it must be the
+// one prysm's imports were compiled against).
+//
+// For hacking on either client locally, don't edit these — drop clones next
+// door and add a gitignored go.work:
+//   go work init . && go work use ../prysm ../go-ethereum
+//
 // Mirrored from prysm/go.mod: replace directives of a dependency module are
-// ignored by Go, so the root module must restate them.
+// ignored by Go, so the root module must restate them. (Prysm's other
+// replace, third_party/go-bip39, is deliberately not mirrored: diffing the
+// vendored copy against upstream tyler-smith/go-bip39@v1.1.0 shows it is
+// functionally identical — a style-only loop rewrite and a newer go
+// directive — so upstream is used directly.)
 replace github.com/json-iterator/go => github.com/prestonvanloon/go v1.1.7-0.20190722034630-4f2e55fcf87b
 
-replace github.com/tyler-smith/go-bip39 => ../prysm/third_party/go-bip39
-
 require (
-	github.com/OffchainLabs/prysm/v7 v7.0.0-00010101000000-000000000000
+	github.com/OffchainLabs/prysm/v7 v7.1.9-0.20260724151744-ce28535d33ea
 	github.com/ethereum/go-ethereum v1.17.4
 	github.com/ipfs/go-log/v2 v2.9.2
 	github.com/joonix/log v0.0.0-20260428191936-c4199ac32b4a

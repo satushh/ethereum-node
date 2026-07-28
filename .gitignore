@@ -1,5 +1,9 @@
 # build artifacts
 bin/
 
+# local-dev workspace overlay pointing at sibling client clones
+go.work
+go.work.sum
+
 # devnet state: chain databases, generated genesis, logs, validator wallet
 run/
