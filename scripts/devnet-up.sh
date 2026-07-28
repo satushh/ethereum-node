@@ -23,7 +23,13 @@ if [ ! -x bin/ethereum-node ]; then
 fi
 if [ ! -x bin/validator ]; then
     echo ">> building prysm validator"
-    (cd ../prysm && go build -o "$PWD/../ethereum-node/bin/validator" ./cmd/validator)
+    if [ -d ../prysm ]; then
+        (cd ../prysm && go build -o "$PWD/../ethereum-node/bin/validator" ./cmd/validator)
+    else
+        # no local clone: install the exact version go.mod pins
+        PRYSM_VERSION=$(go list -m -f '{{.Version}}' github.com/OffchainLabs/prysm/v7)
+        GOBIN="$PWD/bin" go install "github.com/OffchainLabs/prysm/v7/cmd/validator@${PRYSM_VERSION}"
+    fi
 fi
 if [ ! -d run/wallet ]; then
     echo ">> creating devnet validator wallet"

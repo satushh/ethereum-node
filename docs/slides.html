@@ -61,9 +61,7 @@
 <section class="slide">
   <h2>How to run it</h2>
   <pre>
-# clone side by side, then build one binary
-git clone https://github.com/OffchainLabs/prysm.git
-git clone -b v1.17.4 https://github.com/ethereum/go-ethereum.git
+# one clone, one build — clients come from the Go module proxy
 git clone &lt;this-repo&gt; ethereum-node
 cd ethereum-node &amp;&amp; go build -o bin/ethereum-node ./cmd/ethereum-node
 
