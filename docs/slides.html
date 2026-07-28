@@ -98,7 +98,7 @@ engine transport ladder
 </section>
 
 <div class="foot" id="counter"></div>
-<div class="hint">← → / click to navigate</div>
+<div class="hint">← → to navigate</div>
 
 <script>
   const slides = [...document.querySelectorAll('.slide')];
@@ -113,7 +113,6 @@ engine transport ladder
     if (['ArrowRight', ' ', 'PageDown'].includes(e.key)) show(i + 1);
     if (['ArrowLeft', 'PageUp'].includes(e.key)) show(i - 1);
   });
-  addEventListener('click', () => show(i + 1));
   show(0);
 </script>
 </body>
