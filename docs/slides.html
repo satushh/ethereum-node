@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ethereum-node — Geth + Prysm in one binary</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d1117; color: #e6edf3;
+               font: 16px/1.5 -apple-system, "Segoe UI", Helvetica, sans-serif; }
+  .slide { height: 100vh; display: none; flex-direction: column;
+           justify-content: center; padding: 6vh 9vw; box-sizing: border-box; }
+  .slide.active { display: flex; }
+  h1 { font-size: 3em; margin: 0 0 .2em; }
+  h2 { font-size: 1.8em; margin: 0 0 .7em; color: #79c0ff; }
+  p.sub { font-size: 1.3em; color: #8b949e; margin: .2em 0; }
+  pre { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+        padding: 1.1em 1.3em; font-size: .92em; line-height: 1.4;
+        overflow: auto; margin: .8em 0; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  ul { margin: .4em 0; padding-left: 1.2em; }
+  li { margin: .4em 0; font-size: 1.08em; }
+  .dim { color: #8b949e; } .ok { color: #56d364; } .hl { color: #79c0ff; }
+  .foot { position: fixed; bottom: 14px; right: 20px; color: #8b949e; font-size: .85em; }
+  .hint { position: fixed; bottom: 14px; left: 20px; color: #484f58; font-size: .85em; }
+</style>
+</head>
+<body>
+
+<section class="slide">
+  <h1>ethereum-node</h1>
+  <p class="sub">Geth (execution) + Prysm (consensus) — <span class="hl">one binary, one process</span></p>
+  <ul>
+    <li>Both upstream clones <b>unmodified</b>; composed via Go modules (enabled by Prysm's Bazel removal)</li>
+    <li>geth <code>v1.17.4</code> (exactly what prysm/go.mod imports) + prysm <code>develop</code></li>
+    <li>~420 hand-written integration lines, zero upstream changes</li>
+    <li class="ok">Devnet-verified: a block every slot, epochs justified &amp; finalized</li>
+  </ul>
+</section>
+
+<section class="slide">
+  <h2>How it works today</h2>
+  <pre>
+┌──────────────────── ethereum-node (one process) ────────────────────┐
+│         supervisor · one datadir · one lifecycle · one log          │
+│                                                                     │
+│   ┌─ gethapp ───────────┐    Engine API     ┌─ prysmapp ─────────┐  │
+│   │ geth node stack     │◀───────────────▶ │ prysm beacon node  │  │
+│   │ execution/   devp2p │  private IPC       │ beacon/     libp2p │  │
+│   └─────────────────────┘  socket in the     └────────────────────┘  │
+│                            datadir — no JWT,                        │
+│                            nothing to configure                     │
+└─────────────────────────────────────────────────────────────────────┘
+                 validator client stays a separate process</pre>
+  <ul>
+    <li><b>gethapp</b>: geth's public constructors called from config structs (137 lines)</li>
+    <li><b>prysmapp</b>: upstream beacon <code>main.go</code> made importable, handed a synthesized argv</li>
+    <li>Engine API semantics unchanged — same JSON, same validation, separate databases &amp; P2P</li>
+  </ul>
+</section>
+
+<section class="slide">
+  <h2>How to run it</h2>
+  <pre>
+# clone side by side, then build one binary
+git clone https://github.com/OffchainLabs/prysm.git
+git clone -b v1.17.4 https://github.com/ethereum/go-ethereum.git
+git clone &lt;this-repo&gt; ethereum-node
+cd ethereum-node &amp;&amp; go build -o bin/ethereum-node ./cmd/ethereum-node
+
+# one-command local devnet: genesis + combined node + validator
+scripts/devnet-up.sh
+tail -f run/logs/node.log      # geth + prysm lines in one stream
+
+# watch it work
+curl -s localhost:8545 -d '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'
+curl -s localhost:3500/eth/v1/beacon/states/head/finality_checkpoints</pre>
+  <ul>
+    <li>One Ctrl-C stops both halves in order: beacon drains, then geth persists state</li>
+    <li>Observed: ~190 MB RSS, &lt;1% CPU for the whole node on an idle devnet</li>
+  </ul>
+</section>
+
+<section class="slide">
+  <h2>Future work</h2>
+  <pre>
+engine transport ladder
+  now    JSON over private IPC socket     v0 — zero config, upstream bytes
+  next   rpc.DialInProc                   no socket, no syscalls, same JSON
+  later  typed EngineCaller               no JSON — payloads by reference</pre>
+  <ul>
+    <li><code>--network=sepolia|mainnet</code> presets + checkpoint sync — the real product</li>
+    <li>Root-owned globals: one metrics/tracing/log stack; EL spans inside CL block traces</li>
+    <li>In-memory blob delivery &amp; payload storage dedup (stop storing every payload twice)</li>
+    <li><code>--isolation=process</code> escape hatch — crash isolation back, and the A/B harness</li>
+    <li><code>apt install ethereum-node</code> — release pairing + .deb, riding Prysm's Bazel-removal work</li>
+    <li>Upstream <code>beaconapp</code> export — deletes the one copied file; pure composition</li>
+  </ul>
+</section>
+
+<div class="foot" id="counter"></div>
+<div class="hint">← → / click to navigate</div>
+
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  const counter = document.getElementById('counter');
+  let i = 0;
+  function show(n) {
+    i = (n + slides.length) % slides.length;
+    slides.forEach((el, j) => el.classList.toggle('active', j === i));
+    counter.textContent = (i + 1) + ' / ' + slides.length;
+  }
+  addEventListener('keydown', e => {
+    if (['ArrowRight', ' ', 'PageDown'].includes(e.key)) show(i + 1);
+    if (['ArrowLeft', 'PageUp'].includes(e.key)) show(i - 1);
+  });
+  addEventListener('click', () => show(i + 1));
+  show(0);
+</script>
+</body>
+</html>
