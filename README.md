@@ -429,3 +429,59 @@ Methodology, learned the hard way on this very machine:
 - For real-network numbers, run paired nodes on the same testnet
   (e.g. Hoodi) on matched hardware — peers are uncontrollable, so compare
   long-run distributions, never short windows.
+
+## FAQ for the cautious client dev
+
+**Did you fork or patch either client?**
+No. Both clones are unmodified checkouts (`git status` is clean in both);
+composition happens through `go.mod` replace directives. The only
+upstream-derived code is the `internal/prysmapp/` copy, kept byte-close to
+upstream precisely so `diff` against `cmd/beacon-chain/main.go` stays trivial
+on every version bump.
+
+**Is any consensus or validation logic touched?**
+No. The Engine API remains the boundary — same JSON, same semantics — served
+by unmodified geth catalyst code and consumed by unmodified Prysm
+execution-client code. The devnet ran with `execution_optimistic: false`
+throughout: every payload fully executed and verified by the embedded EL.
+
+**One go-ethereum is linked into the binary — which one?**
+Exactly the version Prysm's go.mod requires (v1.17.4 today). That is the
+bundle's core invariant: Prysm's own imports and the running EL are the same
+code. Bumping either side means re-aligning the pair and re-running the
+compatibility tests — which is what a versions.lock CI encodes later.
+
+**What about process-global state colliding?**
+The known list: logging (two formatters share stderr, and Prysm's
+trace-verbosity path overwrites the geth log handler), metrics registries,
+pprof, GOMAXPROCS (Prysm's automaxprocs side-effect import), and signal
+handlers — Prysm's is deliberately kept as the shutdown driver. The devnet
+defaults sidestep the collisions (beacon monitoring off); root-owned globals
+is future-work #2 and a hard requirement before anything production-shaped.
+
+**A panic in one module kills both, right?**
+Yes — the honest cost of one process. Both clients already tolerate unclean
+death (journal/replay on restart), and `--isolation=process` (future-work #7)
+restores separate failure domains from the same binary for operators who
+want them.
+
+**Does this couple the two teams' releases?**
+No. Both develop and release independently; a bundle is a *tested pair* of
+existing releases. A security release on either side rebuilds against the
+last known-good counterpart instead of waiting for the other team.
+
+**Can the embedded halves still talk to external counterparts?**
+Yes, deliberately. `ethereum-node beacon --execution-endpoint=<any EL>` is
+the stock Prysm CLI running embedded, and the embedded geth keeps authrpc on
+127.0.0.1:8551 so an external CL can attach. Cross-client compatibility is
+why the serialized Engine API path never goes away.
+
+**Why is the validator not in-process too?**
+Keys want their own security and failure domain, and slashing risk makes that
+non-negotiable for anything beyond toys. A `--with-validator` devnet
+convenience could exist later; the default split stays.
+
+**What is the licensing situation?**
+`internal/prysmapp/` is a copy of GPL-3.0 Prysm code and the binary links
+geth (LGPL-3.0/GPL-3.0), so this repo must carry a GPL-3.0 LICENSE before
+any distribution of source or binaries.
