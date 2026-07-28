@@ -93,6 +93,49 @@ isolation: a panic in either module now takes down both. A production version
 would keep a `--isolation=process` escape hatch (same binary, supervised
 child processes) for operators who want the old failure domain back.
 
+## How v0 was built, from first principles
+
+Strip away the CLIs and each client is a Go constructor with a start method.
+The whole build reduces to four observations:
+
+**What geth needs to start.** `cmd/geth` is a thin flag-parser around public
+packages: fill a `node.Config` (datadir, IPC, HTTP, p2p) and an
+`ethconfig.Config` (genesis, sync mode), then call
+`node.New` → `utils.RegisterEthService` → `catalyst.Register` →
+`stack.Start()`. Every one of those is importable, so the execution module
+(`internal/gethapp/`, 137 lines) just makes the same calls with config
+structs instead of flags. Nothing else is required.
+
+**What prysm needs to start.** The beacon node is the opposite shape: its
+constructor `node.New(cliCtx, ...)` reads its many options through a
+`cli.Context`, so it cannot be wired from plain structs without rewriting
+upstream. The honest alternative is to keep the upstream CLI app but make it
+importable: `internal/prysmapp/` is `cmd/beacon-chain/main.go` copied
+verbatim into a package with a `Run(ctx, argv)` entrypoint, and the
+supervisor synthesizes exactly the argv it would have received on a command
+line.
+
+**What connects them.** Nothing new. Geth serves the engine API on its IPC
+socket (no JWT on IPC — the reason Prysm's docs already recommend it), and
+Prysm accepts a socket path as `--execution-endpoint`. "Combining" is
+therefore just call order:
+
+```
+1. start geth            → it creates <datadir>/execution/geth.ipc
+2. run prysm in-process  → --execution-endpoint=<that path>
+3. prysm blocks until SIGINT/SIGTERM (its own handler — the shutdown driver)
+4. when it returns, close the geth stack
+```
+
+**What must agree.** Genesis and identity: the EL genesis hash is embedded in
+the CL genesis state, and the chain ID must match `DEPOSIT_CHAIN_ID` (Prysm
+verifies via `eth_chainId` on connect). `prysmctl` already emits both files
+from one command, so it is mounted as `ethereum-node testnet
+generate-genesis` and the invariant holds by construction.
+
+That is the entire trick: one process, two constructors, and a socket path
+passed by variable instead of configured by an operator.
+
 ## How a slot flows through the process
 
 Everything below happens inside the one `ethereum-node` process; the only
