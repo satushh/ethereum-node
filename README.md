@@ -1,0 +1,388 @@
+# ethereum-node — Geth + Prysm in one binary, one process
+
+A composition experiment: link the unmodified sources of
+[go-ethereum](https://github.com/ethereum/go-ethereum) (execution layer) and
+[Prysm](https://github.com/OffchainLabs/prysm) (consensus layer) into a single
+native executable that runs both as modules of one process. Prysm's Bazel
+removal made this possible: both clients now build with the ordinary Go
+toolchain, so a small integration module can compose them the way any Go
+program composes libraries.
+
+```
++--------------------------------------------------------------+
+|            ethereum-node (one process, one binary)           |
+|                                                              |
+|  cmd/ethereum-node/main.go — config, lifecycle, shutdown     |
+|                                                              |
+|  +--------------------+     Engine API      +--------------+ |
+|  | internal/gethapp   |<------------------->| internal/    | |
+|  | geth node stack    |  private IPC socket | prysmapp     | |
+|  |                    |  in the datadir     | beacon node  | |
+|  | execution/ datadir |  (no JWT, no ports) | beacon/      | |
+|  | devp2p             |                     | libp2p/QUIC  | |
+|  +--------------------+                     +--------------+ |
++--------------------------------------------------------------+
+
+        prysm validator client remains a separate process
+```
+
+Design points (see the repo-level discussion that motivated this):
+
+- **Geth and Prysm stay independent projects.** This module contains no copied
+  client code paths beyond a verbatim, importable adaptation of Prysm's
+  `cmd/beacon-chain/main.go` (which is `package main` upstream and therefore
+  cannot be linked). Both clones are wired in via `go.mod` `replace`
+  directives.
+- **Version alignment.** Prysm's `go.mod` requires `go-ethereum v1.17.4`, so
+  the go-ethereum clone is checked out at exactly `v1.17.4`. One Go binary can
+  contain only one go-ethereum, and it should be the one Prysm's imports were
+  compiled against.
+- **The Engine API boundary is preserved.** The consensus module talks to the
+  execution module over geth's IPC socket inside the datadir — the same
+  serialized Engine API used between separate processes, just with zero
+  operator configuration (no JWT, no localhost port). An authenticated HTTP
+  engine endpoint stays available on 127.0.0.1:8551 as an escape hatch for
+  pointing an external CL at the embedded EL. An in-process transport
+  (`rpc.DialInProc`, already used by geth's blsync mode) is the obvious next
+  optimization, kept out of v0 on purpose.
+- **Databases and P2P stacks remain separate** (execution/ and beacon/ under
+  one datadir root; devp2p and libp2p side by side).
+
+## Why one binary?
+
+Both teams keep developing and releasing independently; what merges is the
+artifact. That alone buys a lot:
+
+**Node-operator UX.** One file to download, verify, upgrade and run: one
+command, one datadir, one config, one service unit, one log stream. The whole
+Engine-API plumbing class of setup errors disappears — no JWT secret to
+generate and share, no authrpc port to expose, no endpoint URL to mistype;
+the two halves find each other on a private IPC socket inside the datadir.
+And an incompatible EL/CL version pair becomes impossible to run: the bundle
+*is* a tested pair (`ethereum-node version` reports the exact upstream
+versions inside).
+
+**Operations.** One lifecycle owner: startup ordering (EL first, CL dials a
+socket that already exists) and graceful shutdown (one SIGTERM drains the
+beacon services, then persists EL state) are coordinated in-process instead
+of by systemd unit ordering and luck. One place for status/health, one
+telemetry destination, one resource budget — instead of two daemons with two
+monitoring stacks and two half-overlapping failure modes. When something
+stalls, the interleaved EL+CL log is already correlated.
+
+**Performance headroom** (deliberately not claimed yet — needs benchmarks).
+Today the Engine API still crosses a local socket as JSON even though both
+ends share an address space. The staged wins: drop the socket and auth for
+geth's in-process RPC pipe (`rpc.DialInProc`), then typed in-memory calls to
+stop serializing multi-megabyte payloads entirely; share scheduling and
+backpressure between EL and CL instead of two processes contending blindly
+for the same cores and disk; collapse duplicated runtime overhead (two
+metrics/pprof/telemetry stacks, two fd budgets, two GC tunings) into one.
+
+**Ecosystem.** A single artifact is what makes `apt install ethereum-node`
+realistic (Prysm's Bazel-removal plan already targets reproducible builds and
+.deb packaging), which lowers the bar for home stakers — a decentralization
+win, not just convenience. A unified node is also the natural adoption target
+for coordinated EL+CL networking work (shared QUIC listeners, joint bandwidth
+scheduling, erasure-coded payload propagation à la ethp2p).
+
+**What it deliberately does not change.** Execution and consensus databases,
+P2P stacks and protocol responsibilities stay separate — that duplication is
+protocol design, not waste. The honest cost of one process is crash
+isolation: a panic in either module now takes down both. A production version
+would keep a `--isolation=process` escape hatch (same binary, supervised
+child processes) for operators who want the old failure domain back.
+
+## How a slot flows through the process
+
+Everything below happens inside the one `ethereum-node` process; the only
+things crossing a process boundary are the validator's gRPC calls and libp2p
+gossip. Each numbered step names the log line it produces, so you can watch
+this exact loop in `run/logs/node.log`.
+
+```
+ prysm validator ......... separate process, gRPC to 127.0.0.1:4000
+      │
+      ▼
+┌── prysmapp module (consensus) ─────┐        ┌── gethapp module (execution) ──────┐
+│                                    │        │                                    │
+│ 1 proposer duty at slot start      │ engine │                                    │
+│   "Building block"                 │  API   │                                    │
+│   fetch payload ───────────────────┼─(IPC)──┼─▶ 2 engine_getPayloadV5            │
+│                                    │        │     hand over payload built since  │
+│ 3 wrap payload in beacon block,    │        │     the previous slot              │
+│   sign, gossip via libp2p          │        │     "Stopping work on payload"     │
+│                                    │        │                                    │
+│ 4 import the block:                │        │                                    │
+│   state transition + DA checks     │        │                                    │
+│   "Synced new block"               │        │                                    │
+│   verify payload ──────────────────┼─(IPC)──┼─▶ 5 engine_newPayloadV4            │
+│                                    │        │     execute txs, verify state root │
+│                                    │        │     "Imported new potential        │
+│                                    │        │      chain segment"                │
+│ 6 fork choice picks new head       │        │                                    │
+│   "Forkchoice updated with         │        │                                    │
+│    payload attributes"─────────────┼─(IPC)──┼─▶ 7 engine_forkchoiceUpdatedV3     │
+│                                    │        │     set canonical head; start      │
+│                                    │        │     building next slot's payload   │
+│ 8 attestations arrive (gRPC +      │        │     "Chain head was updated"       │
+│   gossip), pooled for next block   │        │     "Starting work on payload"     │
+│                                    │        │                                    │
+│ beacon DB (bolt)   libp2p/QUIC     │        │ chain DB (pebble)   devp2p         │
+└────────────────────────────────────┘        └────────────────────────────────────┘
+         datadir/beacon/                                datadir/execution/
+                     └────────── one datadir, one process ──────────┘
+```
+
+The IPC arrows are the standard Engine API — same semantics, same JSON — on a
+socket private to the datadir. Nothing about the protocol was changed, which
+is exactly why the unmodified upstream code runs.
+
+## Is this just the two clients glued together?
+
+Today: functionally yes, deliberately. The engine path still serializes the
+same JSON over a socket, so behaviour, test coverage and cross-client
+compatibility carry over untouched — that is the right property for a v0.
+What changes immediately is everything around the clients (setup, lifecycle,
+one artifact, correlated logs). The interesting part is what the shared
+address space makes possible next. The transport ladder:
+
+```
+ today   Prysm ──JSON──▶ unix socket ──▶ Geth      same bytes as two processes,
+         engine API over in-datadir IPC            zero operator config, no JWT
+
+ next    Prysm ──JSON──▶ rpc.DialInProc ──▶ Geth   no socket, no syscalls, no
+         (go-ethereum/rpc/inproc.go:25, already    connection management; still
+         used by geth's blsync mode)               JSON in memory
+
+ later   Prysm ──typed Go calls──▶ Geth            no serialization at all:
+         implement EngineCaller                    ExecutableData/blobs passed
+         (prysm/beacon-chain/execution/            by reference, validated
+         engine_client.go:53) directly on          against the JSON path by
+         catalyst.ConsensusAPI                     running both in tests
+         (go-ethereum/eth/catalyst/api.go:768)
+```
+
+Redundant work between the two halves, and what in-process composition can do
+about it:
+
+| Redundancy | Two processes | This binary today | Possible in one process |
+|---|---|---|---|
+| Engine transport | JSON + socket + JWT per call | JSON + socket (no JWT) | typed calls, zero serialization |
+| Blob delivery (`engine_getBlobsV2/V3`) | multi-MB hex-JSON round trips | same | blob refs handed over in memory |
+| EL liveness + eth1 data | polling `eth_chainId`/headers over RPC | same | subscribe to geth's chain event feed directly |
+| Payload storage | every execution payload stored twice: in geth's chain DB *and* inside beacon blocks in Prysm's DB | same | store bodies once, CL references EL storage |
+| Observability | two metrics endpoints, two pprof servers, two trace configs to wire to one dashboard | one process, but still two stacks | one registry/provider, EL spans nested inside CL block-import traces |
+| Sync coordination | "is the EL synced yet" heuristics over RPC timeouts | same | direct state queries, shared backpressure |
+| Lifecycle | systemd unit ordering + health-check scripts | one supervisor, ordered start/stop | — (done) |
+| Setup | two configs, JWT generation, endpoint URLs | one command | — (done) |
+
+None of the protocol-level duplication goes away, on purpose: execution state
+vs beacon state, txpool vs attestation/operation pools, devp2p vs libp2p are
+different protocol responsibilities, not waste. Sharing the *networking
+substrate* (QUIC listeners, bandwidth scheduling, discovery) is plausible
+later — that is the ethp2p direction — but is explicitly out of scope here.
+
+A caution against over-promising: Engine API serialization is small next to
+EVM execution, state I/O and BLS verification, so the typed transport is a
+proposal-latency and allocation win, not a throughput revolution. The two
+candidates with genuinely large wins are the blob path (biggest bytes moved
+per slot on a mainnet-like load) and payload storage dedup (beacon DBs are
+dominated by embedded execution payloads). Measure before claiming either.
+
+## Upstream changes required: none
+
+Neither clone is modified — `git status` in both is clean; all integration
+lives in this module (~1,200 lines total, mostly boilerplate):
+
+| Piece | Lines | Nature |
+|---|---|---|
+| `internal/prysmapp/prysmapp.go` | 398 | near-verbatim copy of `prysm/cmd/beacon-chain/main.go`, needed only because upstream is `package main` |
+| `internal/gethapp/gethapp.go` | 137 | new, thin wrapper over geth's public embedding API (`node`, `cmd/utils`, `eth/catalyst`) |
+| `cmd/ethereum-node/` (main.go + wallet.go) | 280 | new: supervisor CLI, arg plumbing, devnet wallet helper |
+| `devnet/config.yml` + `scripts/devnet-up.sh` | 120 | devnet fixtures |
+| `go.mod` | 268 | 4 hand-written replace directives; the rest generated by `go mod tidy` |
+
+So the real hand-written integration is ~420 lines. The one upstream change
+that *would* help (per the design discussion): Prysm exporting its beacon app
+wiring as an importable package (e.g. `runtime/beaconapp`) with a thin
+`cmd/beacon-chain` shim — that would delete the 398-line copy here and turn
+this module into pure composition. Geth already needs nothing: its embedding
+surface is public.
+
+## Layout
+
+```
+ethereum-node/
+  cmd/ethereum-node/    the combined binary (run | beacon | devnet-wallet | testnet | version)
+  internal/gethapp/     programmatic geth embed (~ stripped cmd/geth makeFullNode)
+  internal/prysmapp/    importable adaptation of prysm cmd/beacon-chain/main.go
+  devnet/config.yml     single-node devnet chain config (mainnet preset, all forks at genesis)
+  scripts/devnet-up.sh  boot a local devnet end to end
+  ../go-ethereum        clone @ v1.17.4  (replace target)
+  ../prysm              clone @ develop  (replace target)
+```
+
+## Build
+
+The module composes the two clients via `replace` directives pointing at
+sibling checkouts, so clone all three side by side (the go-ethereum tag must
+match the version in prysm/go.mod — currently v1.17.4):
+
+```sh
+git clone https://github.com/OffchainLabs/prysm.git prysm
+git clone --branch v1.17.4 https://github.com/ethereum/go-ethereum.git go-ethereum
+git clone <this-repo> ethereum-node
+
+cd ethereum-node
+go build -o bin/ethereum-node ./cmd/ethereum-node   # Go >= 1.26.5 (auto-downloaded)
+```
+
+## Run a local devnet
+
+```sh
+scripts/devnet-up.sh          # generates genesis, starts node + validator
+tail -f run/logs/node.log     # geth-format and prysm-format lines interleaved
+```
+
+Verify it is making progress:
+
+```sh
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' http://127.0.0.1:8545
+curl -s http://127.0.0.1:3500/eth/v1/beacon/headers/head
+```
+
+Stop with a single Ctrl-C / SIGTERM: Prysm's signal handler shuts the beacon
+module down, after which the supervisor closes the geth stack.
+
+## Subcommands
+
+- `run` — the combined node. `--datadir` gets `execution/` and `beacon/`
+  subdirectories. `--beacon-flag <flag>` passes extra flags through to the
+  embedded beacon node.
+- `beacon [args...]` — the full upstream Prysm beacon-chain CLI (flags,
+  `db`/`jwt` subcommands) running embedded; useful for debugging.
+- `testnet generate-genesis` — Prysm's genesis generator, mounted from
+  `prysmctl` so the devnet needs no second tool.
+- `devnet-wallet` — builds a validator wallet from the deterministic interop
+  keys matching `--num-validators` premined at genesis.
+- `version` — reports the versions of both bundled components.
+
+## Future work — and what each item buys
+
+Roughly in implementation order:
+
+1. **Public network presets** (`--network=sepolia|hoodi|mainnet`): geth's
+   built-in genesis + bootnodes, Prysm's network flag + checkpoint-sync URL,
+   devnet-only flags dropped. *Buys:* the one-command node for real networks —
+   the actual operator-facing product — and the first realistic workload for
+   every measurement below.
+2. **Root-owned process globals**: one logging setup (shared writer,
+   per-module prefixes instead of two interleaved formats), one OpenTelemetry
+   provider, one Prometheus registry and metrics endpoint, one pprof server.
+   Today the modules can fight over globals — Prysm's trace-verbosity path
+   (`internal/prysmapp/prysmapp.go`, `startNode`) overwrites the geth log
+   handler that `internal/gethapp/gethapp.go` installed. *Buys:* coherent
+   observability (EL `newPayload` spans nested inside CL block-import traces
+   with no traceparent-over-HTTP plumbing) and no last-writer-wins config
+   bugs — the prerequisite for everything being measurable in one place.
+3. **Engine transport ladder** (see diagram above): first
+   `rpc.DialInProc` (`go-ethereum/rpc/inproc.go:25`) — no socket, no
+   syscalls, same JSON; then a typed `EngineCaller`
+   (`prysm/beacon-chain/execution/engine_client.go:53`) implemented directly
+   on `catalyst.ConsensusAPI` (`go-ethereum/eth/catalyst/api.go`). *Buys:*
+   proposal-path latency and allocation churn; the JSON path stays available
+   both as the compatibility boundary and as the differential-testing oracle
+   (run both transports on the same inputs, assert identical results).
+4. **In-memory blob delivery**: `engine_getBlobsV2/V3` responses handed over
+   as references instead of hex-JSON. *Buys:* the largest per-slot byte
+   movement on a mainnet-like load disappears; faster data-column
+   reconstruction under PeerDAS.
+5. **Payload storage dedup**: stop storing execution payloads twice (geth
+   chain DB + embedded in beacon blocks in Prysm's DB); CL keeps headers and
+   references EL bodies. *Buys:* the single biggest disk win — beacon DBs are
+   dominated by embedded payloads — at the cost of careful pruning
+   coordination, which is why it comes after the interfaces above exist.
+6. **Shared scheduling/backpressure**: CL exposes slot deadlines to the EL,
+   EL exposes sync/compaction pressure to the CL, instead of both inferring
+   via timeouts. *Buys:* fewer missed proposals and attestation deadline
+   breaches on constrained hardware, where the two halves currently contend
+   blindly.
+7. **`--isolation=process` escape hatch**: same binary re-executes its two
+   modules as supervised children over the same IPC path. *Buys:* restores
+   crash isolation for operators who want it — and doubles as the cleanest
+   A/B harness for measuring what single-process actually saves (identical
+   code, only the process boundary changes).
+8. **Release pairing + packaging**: a `versions.lock` of tested
+   (geth, prysm) tag pairs, compatibility tests in CI, reproducible builds,
+   `.deb` + systemd unit, an aggregate `status`/`doctor` endpoint. Aligns
+   with Prysm's Bazel-removal plan (which already targets reproducible
+   releases and Debian packaging). *Buys:* `apt install ethereum-node`, and
+   security releases that rebuild against the last known-good counterpart
+   without synchronizing upstream release trains.
+9. **Upstream `beaconapp` export**: Prysm exposing its app wiring as an
+   importable package. *Buys:* deletes the 398-line copy in
+   `internal/prysmapp/`, making this repo pure composition (see "Upstream
+   changes"). Geth needs nothing.
+10. **Shared networking substrate** (ethp2p direction): joint QUIC listeners,
+    bandwidth scheduling, discovery. Explicitly out of scope until the
+    protocol work matures; listed for completeness.
+
+Housekeeping: the go.mod `replace` mirrors (json-iterator fork, vendored
+go-bip39) must be kept in sync with prysm/go.mod when bumping the clone.
+
+## Measuring against v0
+
+v0 is the baseline every step above must beat on like-for-like runs. The
+experimental design that keeps comparisons honest: **same clones, same
+binary where possible, one variable at a time.**
+
+Configurations to compare:
+
+```
+ A  two processes, engine over IPC          standalone geth + `ethereum-node
+    (upstream status quo)                   beacon` in a second process — the
+                                            identical code split in two, so A/B
+                                            isolates the process boundary itself
+ B  this v0: one process, IPC JSON          scripts/devnet-up.sh
+ C  one process, rpc.DialInProc             future work #3, first rung
+ D  one process, typed EngineCaller         future work #3, second rung
+```
+
+What to measure, and where it already exists today:
+
+- **Proposal path latency**: Prysm logs `sinceSlotStartTime` on
+  `Building block` / `Finished building block` / `Synced new block`; geth
+  logs `elapsed=` on `Imported new potential chain segment`. Already
+  parseable from `run/logs/node.log` with grep — no instrumentation needed
+  for B vs C vs D deltas.
+- **Engine call latency/counts**: re-enable metrics for benchmark runs (drop
+  `--disable-monitoring`, geth side `--metrics` equivalent in
+  `internal/gethapp/gethapp.go`) and scrape per-method Engine API timers from
+  both sides; after future-work #2 they land in one registry.
+- **Bytes over the engine boundary**: point `--execution-endpoint` through a
+  tiny counting proxy in modes A–C; mode D's number is zero by construction.
+- **Resource**: RSS/CPU via `ps -o rss=,pcpu= -p $(pgrep -f "ethereum-node run")`
+  sampled per epoch; GC pauses and allocation profiles via pprof
+  (`--beacon-flag pprof` today; one pprof endpoint after #2).
+- **Disk** (for dedup, #5): `du -sh run/data/execution run/data/beacon` after
+  a fixed number of epochs under identical tx + blob load.
+- **Chain health under load**: missed-proposal count (produced blocks vs
+  elapsed slots), attestation inclusion distance, reorg count — the
+  regression guardrails, not the wins.
+
+Methodology, learned the hard way on this very machine:
+
+- Keep the box awake (`caffeinate -is`), on mains power, and idle otherwise;
+  a macOS sleep froze this devnet mid-run and stalled finality for an hour.
+- Drive load or the numbers are fiction: an empty-block devnet exercises
+  neither the EVM nor the blob path. Point a tx spammer (and later a blob-tx
+  spammer) at `127.0.0.1:8545`.
+- Discard the first epoch (warmup, follow-distance startup noise), run ≥ 200
+  slots per configuration, repeat 3×, and compare medians and p95/p99 —
+  distributions, not means; GC makes means lie.
+- Change one rung of the ladder at a time, from identical genesis files.
+- For real-network numbers, run paired nodes on the same testnet
+  (e.g. Hoodi) on matched hardware — peers are uncontrollable, so compare
+  long-run distributions, never short windows.
