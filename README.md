@@ -317,8 +317,10 @@ module down, after which the supervisor closes the geth stack.
   embedded beacon node.
 - `beacon [args...]` — the full upstream Prysm beacon-chain CLI (flags,
   `db`/`jwt` subcommands) running embedded; useful for debugging.
-- `testnet generate-genesis` — Prysm's genesis generator, mounted from
-  `prysmctl` so the devnet needs no second tool.
+- `testnet generate-genesis` — Prysm's genesis generator, mounted unchanged
+  from `prysmctl` so the devnet needs no second tool. ("testnet" here means
+  *creating a private network's genesis*, not joining Sepolia/Hoodi — that is
+  future-work #1.)
 - `devnet-wallet` — builds a validator wallet from the deterministic interop
   keys matching `--num-validators` premined at genesis.
 - `version` — reports the versions of both bundled components.
@@ -329,9 +331,14 @@ Roughly in implementation order:
 
 1. **Public network presets** (`--network=sepolia|hoodi|mainnet`): geth's
    built-in genesis + bootnodes, Prysm's network flag + checkpoint-sync URL,
-   devnet-only flags dropped. *Buys:* the one-command node for real networks —
-   the actual operator-facing product — and the first realistic workload for
-   every measurement below.
+   devnet-only flags dropped. Both clients already ship all of this upstream
+   (geth: `params/bootnodes.go` + embedded genesis; prysm: `--hoodi` etc. +
+   `--checkpoint-sync-url`, reachable today via `--beacon-flag` passthrough) —
+   the entire change is ~30 lines in `internal/gethapp/`, which currently
+   hardcodes the devnet posture (`NoDiscovery`, `NoDial`, loopback listen,
+   `FullSync`, explicit genesis file). *Buys:* the one-command node for real
+   networks — the actual operator-facing product — and the first realistic
+   workload for every measurement below.
 2. **Root-owned process globals**: one logging setup (shared writer,
    per-module prefixes instead of two interleaved formats), one OpenTelemetry
    provider, one Prometheus registry and metrics endpoint, one pprof server.
