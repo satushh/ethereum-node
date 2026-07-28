@@ -1,0 +1,5 @@
+# build artifacts
+bin/
+
+# devnet state: chain databases, generated genesis, logs, validator wallet
+run/
