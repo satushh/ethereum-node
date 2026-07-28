@@ -336,9 +336,15 @@ Roughly in implementation order:
    `--checkpoint-sync-url`, reachable today via `--beacon-flag` passthrough) —
    the entire change is ~30 lines in `internal/gethapp/`, which currently
    hardcodes the devnet posture (`NoDiscovery`, `NoDial`, loopback listen,
-   `FullSync`, explicit genesis file). *Buys:* the one-command node for real
-   networks — the actual operator-facing product — and the first realistic
-   workload for every measurement below.
+   `FullSync`, explicit genesis file). Same item, same reason: a single
+   config file (`ethereum-node.yaml` with `node` / `execution` / `consensus`
+   sections) — prysm already loads YAML config files in its Before hook, so
+   the supervisor splits one file and feeds the consensus section to prysm's
+   existing loader while execution keys map onto geth's config structs.
+   Everything not set keeps each client's stock defaults, exactly as flags do
+   today. *Buys:* the one-command, one-config node for real networks — the
+   actual operator-facing product — and the first realistic workload for
+   every measurement below.
 2. **Root-owned process globals**: one logging setup (shared writer,
    per-module prefixes instead of two interleaved formats), one OpenTelemetry
    provider, one Prometheus registry and metrics endpoint, one pprof server.
