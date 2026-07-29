@@ -382,11 +382,21 @@ scripts/observability-up.sh        # grafana: http://127.0.0.1:3001 (no login)
 scripts/observability-up.sh down
 ```
 
-Two dashboards are auto-provisioned: **Beacon node (detailed)** — adapted
-from [nalepae/infra](https://github.com/nalepae/infra), 79 panels, minus the
-few needing log/trace datasources this stack doesn't run — and the compact
-**ethereum-node** dashboard, which shows both halves of the process on one
-screen: CL head slot / justified / finalized epochs next to
+Three dashboards are auto-provisioned:
+
+- **ethereum-node** — the combined view: both halves of the process on one
+  screen, plus a geth-details row (head/safe/finalized pointers, txpool, DB
+  size, devp2p bandwidth, RPC rate — which on this node is literally the
+  engine API traffic over IPC).
+- **Beacon node (detailed)** — adapted from
+  [nalepae/infra](https://github.com/nalepae/infra); 79 panels, minus the few
+  needing log/trace datasources this stack doesn't run.
+- **Geth node (detailed)** — adapted from
+  [Grafana dashboard 14053](https://grafana.com/grafana/dashboards/14053-geth-overview/),
+  with every query validated against the live v1.17.4 exporter and dead
+  targets dropped (several per-phase timing metrics no longer exist).
+
+The compact combined dashboard shows: CL head slot / justified / finalized epochs next to
 the EL head block, CL and EL peer counts, state-transition timing, memory of
 all three processes, and per-module `up` status. One quirk found while
 building it: geth v1.17.4 declares `chain/inserts` but never updates it
