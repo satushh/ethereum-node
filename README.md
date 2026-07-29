@@ -368,6 +368,29 @@ What to expect on Hoodi:
 - No validator keys are involved; this is a following node. The validator
   client remains separate and optional.
 
+## Single config file
+
+Everything `run` accepts can live in one YAML (`--config`), with explicit CLI
+flags overriding file values and unset keys keeping each client's stock
+defaults. Examples in `configs/`:
+
+```yaml
+node:                          # supervisor-level
+  datadir: ./run/hoodi-data
+  network: hoodi
+execution:                     # the exposed geth options (struct-mapped)
+  http-port: 8545
+consensus:
+  flags: [supernode]           # raw beacon switches
+  settings:                    # upstream prysm flag names, fed verbatim to
+    beacon-db-pruning: true    # prysm's own --config-file loader — the full
+                               # beacon flag surface, one operator file
+```
+
+```sh
+ethereum-node run --config configs/hoodi.yaml
+```
+
 ## Observability
 
 Metrics are on by default (`--metrics`, on 127.0.0.1 only): geth's exporter
@@ -423,10 +446,11 @@ one root-owned registry is future-work #2.
 
 ## Future work — and what each item buys
 
-**Status:** devnet observability is done, and the network-preset half of
-item 1 shipped (`--network=hoodi|sepolia|mainnet`, verified live on Hoodi).
-The immediate next milestone is the remaining half of item 1 — the single
-config file — followed by root-owned globals (item 2).
+**Status:** item 1 is complete — network presets
+(`--network=hoodi|sepolia|mainnet`, verified live on Hoodi) and the single
+config file (`--config`, see above) have both shipped, along with devnet
+observability. The immediate next milestone is root-owned process globals
+(item 2).
 
 Roughly in implementation order:
 
