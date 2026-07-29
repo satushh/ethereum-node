@@ -16,6 +16,7 @@ import (
 	prysmcmd "github.com/OffchainLabs/prysm/v7/cmd"
 	beaconflags "github.com/OffchainLabs/prysm/v7/cmd/beacon-chain/flags"
 	beacongenesis "github.com/OffchainLabs/prysm/v7/cmd/beacon-chain/genesis"
+	checkpoint "github.com/OffchainLabs/prysm/v7/cmd/beacon-chain/sync/checkpoint"
 	testnetcmds "github.com/OffchainLabs/prysm/v7/cmd/prysmctl/testnet"
 	prysmversion "github.com/OffchainLabs/prysm/v7/runtime/version"
 	gethversion "github.com/ethereum/go-ethereum/version"
@@ -36,6 +37,14 @@ var (
 		Name:  "datadir",
 		Usage: "Root data directory; execution/ and beacon/ subdirectories are created inside",
 		Value: "./ethereum-node-data",
+	}
+	networkFlag = &cli.StringFlag{
+		Name:  "network",
+		Usage: "Public network preset (hoodi|sepolia|mainnet): built-in genesis + bootnodes, snap sync, checkpoint sync. Mutually exclusive with --el-genesis",
+	}
+	checkpointURLFlag = &cli.StringFlag{
+		Name:  "checkpoint-sync-url",
+		Usage: "Beacon API endpoint for checkpoint sync and genesis (default: https://checkpoint-sync.<network>.ethpandaops.io)",
 	}
 	elGenesisFlag = &cli.StringFlag{
 		Name:  "el-genesis",
@@ -123,7 +132,8 @@ func runCommand() *cli.Command {
 		Name:  "run",
 		Usage: "Run the combined execution + consensus node",
 		Flags: []cli.Flag{
-			datadirFlag, elGenesisFlag, clGenesisStateFlag, clChainConfigFlag,
+			datadirFlag, networkFlag, checkpointURLFlag,
+			elGenesisFlag, clGenesisStateFlag, clChainConfigFlag,
 			httpPortFlag, authPortFlag, p2pListenFlag, feeRecipientFlag,
 			verbosityFlag, metricsFlag, beaconFlagPassthrough,
 		},
@@ -136,6 +146,14 @@ func runNode(c *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	network := c.String(networkFlag.Name)
+	if network != "" && c.String(elGenesisFlag.Name) != "" {
+		return fmt.Errorf("--%s and --%s are mutually exclusive", networkFlag.Name, elGenesisFlag.Name)
+	}
+	p2pListen := c.String(p2pListenFlag.Name)
+	if network != "" && !c.IsSet(p2pListenFlag.Name) {
+		p2pListen = ":30303" // public networks need inbound-capable devp2p
+	}
 
 	fmt.Printf("ethereum-node %s starting\n", bundleVersion)
 	fmt.Printf("  execution: geth v%d.%d.%d-%s -> %s\n", gethversion.Major, gethversion.Minor, gethversion.Patch, gethversion.Meta, filepath.Join(datadir, "execution"))
@@ -147,11 +165,12 @@ func runNode(c *cli.Context) error {
 	}
 	gethNode, err := gethapp.Start(gethapp.Config{
 		DataDir:     filepath.Join(datadir, "execution"),
+		Network:     network,
 		GenesisPath: c.String(elGenesisFlag.Name),
 		HTTPHost:    "127.0.0.1",
 		HTTPPort:    c.Int(httpPortFlag.Name),
 		AuthPort:    c.Int(authPortFlag.Name),
-		P2PListen:   c.String(p2pListenFlag.Name),
+		P2PListen:   p2pListen,
 		Verbosity:   c.String(verbosityFlag.Name),
 		MetricsPort: gethMetricsPort,
 	})
@@ -181,6 +200,17 @@ func runNode(c *cli.Context) error {
 		)
 	} else {
 		beaconArgs = append(beaconArgs, "--"+prysmcmd.DisableMonitoringFlag.Name)
+	}
+	if network != "" {
+		checkpointURL := c.String(checkpointURLFlag.Name)
+		if checkpointURL == "" {
+			checkpointURL = fmt.Sprintf("https://checkpoint-sync.%s.ethpandaops.io", network)
+		}
+		beaconArgs = append(beaconArgs,
+			"--"+network, // prysm's own network preset flag (--hoodi etc.)
+			fmt.Sprintf("--%s=%s", checkpoint.RemoteURL.Name, checkpointURL),
+			fmt.Sprintf("--%s=%s", beacongenesis.BeaconAPIURL.Name, checkpointURL),
+		)
 	}
 	if v := c.String(clChainConfigFlag.Name); v != "" {
 		beaconArgs = append(beaconArgs, fmt.Sprintf("--%s=%s", prysmcmd.ChainConfigFileFlag.Name, v))

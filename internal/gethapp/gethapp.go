@@ -17,6 +17,9 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/node"
+	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/ethereum/go-ethereum/p2p/nat"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/version"
 )
 
@@ -24,7 +27,8 @@ import (
 // the execution module. Everything else uses upstream defaults.
 type Config struct {
 	DataDir     string // execution layer data directory
-	GenesisPath string // path to a core.Genesis JSON file (devnet genesis)
+	Network     string // public network preset (hoodi|sepolia|mainnet); "" means custom genesis via GenesisPath
+	GenesisPath string // path to a core.Genesis JSON file (devnet genesis; ignored when Network is set)
 	HTTPHost    string // eth/net/web3 JSON-RPC host ("" disables HTTP)
 	HTTPPort    int
 	AuthPort    int    // authenticated engine API port (escape hatch for external CLs; the embedded CL uses IPC)
@@ -45,7 +49,7 @@ type Node struct {
 func Start(cfg Config) (*Node, error) {
 	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, verbosityLevel(cfg.Verbosity), false)))
 
-	genesis, err := loadGenesis(cfg.GenesisPath)
+	genesis, bootnodes, err := networkPreset(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -72,9 +76,18 @@ func Start(cfg Config) (*Node, error) {
 	nodeCfg.AuthAddr = "127.0.0.1"
 	nodeCfg.AuthPort = cfg.AuthPort
 	nodeCfg.P2P.ListenAddr = cfg.P2PListen
-	nodeCfg.P2P.NoDiscovery = true
-	nodeCfg.P2P.NoDial = true
-	nodeCfg.P2P.NAT = nil
+	if cfg.Network != "" {
+		// Public network: find peers via bootnodes + discovery.
+		nodeCfg.P2P.BootstrapNodes = bootnodes
+		nodeCfg.P2P.NoDiscovery = false
+		nodeCfg.P2P.NoDial = false
+		nodeCfg.P2P.NAT = nat.Any()
+	} else {
+		// Devnet: single node, no peers wanted.
+		nodeCfg.P2P.NoDiscovery = true
+		nodeCfg.P2P.NoDial = true
+		nodeCfg.P2P.NAT = nil
+	}
 
 	stack, err := node.New(&nodeCfg)
 	if err != nil {
@@ -84,7 +97,12 @@ func Start(cfg Config) (*Node, error) {
 	ethCfg := ethconfig.Defaults
 	ethCfg.Genesis = genesis
 	ethCfg.NetworkId = genesis.Config.ChainID.Uint64()
-	ethCfg.SyncMode = ethconfig.FullSync
+	if cfg.Network != "" {
+		ethCfg.SyncMode = ethconfig.SnapSync
+		utils.SetDNSDiscoveryDefaults(&ethCfg, genesis.ToBlock().Hash())
+	} else {
+		ethCfg.SyncMode = ethconfig.FullSync
+	}
 
 	backend, ethService := utils.RegisterEthService(stack, &ethCfg)
 	utils.RegisterFilterAPI(stack, backend, &ethCfg)
@@ -113,6 +131,36 @@ func (n *Node) HTTPEndpoint() string {
 // Close performs a graceful shutdown of the geth stack.
 func (n *Node) Close() error {
 	return n.stack.Close()
+}
+
+// networkPreset resolves the genesis and bootnodes for a public network, or
+// loads the custom genesis file for devnets. Public presets come straight
+// from geth's own params, so supported networks track upstream.
+func networkPreset(cfg Config) (*core.Genesis, []*enode.Node, error) {
+	var genesis *core.Genesis
+	var urls []string
+	switch cfg.Network {
+	case "":
+		g, err := loadGenesis(cfg.GenesisPath)
+		return g, nil, err
+	case "hoodi":
+		genesis, urls = core.DefaultHoodiGenesisBlock(), params.HoodiBootnodes
+	case "sepolia":
+		genesis, urls = core.DefaultSepoliaGenesisBlock(), params.SepoliaBootnodes
+	case "mainnet":
+		genesis, urls = core.DefaultGenesisBlock(), params.MainnetBootnodes
+	default:
+		return nil, nil, fmt.Errorf("unknown network %q (supported: hoodi, sepolia, mainnet)", cfg.Network)
+	}
+	bootnodes := make([]*enode.Node, 0, len(urls))
+	for _, url := range urls {
+		n, err := enode.Parse(enode.ValidSchemes, url)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse bootnode %q: %w", url, err)
+		}
+		bootnodes = append(bootnodes, n)
+	}
+	return genesis, bootnodes, nil
 }
 
 func loadGenesis(path string) (*core.Genesis, error) {
