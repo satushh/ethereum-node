@@ -1,0 +1,24 @@
+# Single-node local devnet, the config-file equivalent of what
+# scripts/devnet-up.sh passes as flags. Generate the genesis fixtures first:
+#
+#   bin/ethereum-node devnet-wallet --wallet-dir=run/wallet --num-validators=64
+#   bin/ethereum-node testnet generate-genesis --fork=fulu --num-validators=64 \
+#     --genesis-time-delay=45 --chain-config-file=devnet/config.yml \
+#     --geth-genesis-json-out=run/genesis.json --output-ssz=run/genesis.ssz
+#
+# then:  ethereum-node run --config configs/devnet.yaml
+node:
+  datadir: ./run/data
+
+execution:
+  genesis: ./run/genesis.json
+
+consensus:
+  genesis-state: ./run/genesis.ssz
+  chain-config: ./devnet/config.yml
+  flags:
+    - no-discovery
+    - supernode
+    - min-sync-peers=0
+    - minimum-peers-per-subnet=0
+    - contract-deployment-block=0

@@ -38,6 +38,10 @@ var (
 		Usage: "Root data directory; execution/ and beacon/ subdirectories are created inside",
 		Value: "./ethereum-node-data",
 	}
+	configFlag = &cli.StringFlag{
+		Name:  "config",
+		Usage: "YAML config file with node/execution/consensus sections; explicit CLI flags override file values",
+	}
 	networkFlag = &cli.StringFlag{
 		Name:  "network",
 		Usage: "Public network preset (hoodi|sepolia|mainnet): built-in genesis + bootnodes, snap sync, checkpoint sync. Mutually exclusive with --el-genesis",
@@ -132,7 +136,7 @@ func runCommand() *cli.Command {
 		Name:  "run",
 		Usage: "Run the combined execution + consensus node",
 		Flags: []cli.Flag{
-			datadirFlag, networkFlag, checkpointURLFlag,
+			configFlag, datadirFlag, networkFlag, checkpointURLFlag,
 			elGenesisFlag, clGenesisStateFlag, clChainConfigFlag,
 			httpPortFlag, authPortFlag, p2pListenFlag, feeRecipientFlag,
 			verbosityFlag, metricsFlag, beaconFlagPassthrough,
@@ -142,6 +146,13 @@ func runCommand() *cli.Command {
 }
 
 func runNode(c *cli.Context) error {
+	var beaconFileArgs []string
+	if path := c.String(configFlag.Name); path != "" {
+		var err error
+		if beaconFileArgs, err = applyFileConfig(c, path); err != nil {
+			return err
+		}
+	}
 	datadir, err := filepath.Abs(c.String(datadirFlag.Name))
 	if err != nil {
 		return err
@@ -218,6 +229,7 @@ func runNode(c *cli.Context) error {
 	if v := c.String(clGenesisStateFlag.Name); v != "" {
 		beaconArgs = append(beaconArgs, fmt.Sprintf("--%s=%s", beacongenesis.StatePath.Name, v))
 	}
+	beaconArgs = append(beaconArgs, beaconFileArgs...)
 	for _, f := range c.StringSlice(beaconFlagPassthrough.Name) {
 		beaconArgs = append(beaconArgs, "--"+f)
 	}
