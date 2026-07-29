@@ -36,20 +36,26 @@ type fileConfig struct {
 		AuthrpcPort int    `yaml:"authrpc-port"`
 		P2PListen   string `yaml:"p2p-listen"`
 		Genesis     string `yaml:"genesis"`
+		Settings    string `yaml:"settings"` // geth-native TOML (dumpconfig format), full geth option surface
 	} `yaml:"execution"`
 	Consensus struct {
 		GenesisState string         `yaml:"genesis-state"`
 		ChainConfig  string         `yaml:"chain-config"`
-		Flags        []string       `yaml:"flags"`
-		Settings     map[string]any `yaml:"settings"`
+		Settings     map[string]any `yaml:"settings"` // upstream prysm flag names, full beacon option surface
 	} `yaml:"consensus"`
 }
 
+// fileExtras carries the parts of the config file that bypass the CLI flag
+// layer entirely and go straight to each client's own loader.
+type fileExtras struct {
+	BeaconArgs   []string // synthesized argv additions for the beacon node
+	GethSettings string   // TOML for gethapp's settings decoder
+}
+
 // applyFileConfig loads the YAML file and applies it onto the cli context,
-// leaving any flag the user set explicitly untouched. It returns extra
-// passthrough args for the beacon node (consensus.flags plus a generated
-// prysm config file for consensus.settings).
-func applyFileConfig(c *cli.Context, path string) ([]string, error) {
+// leaving any flag the user set explicitly untouched. The two settings
+// sections are returned for delivery to each client's own loader.
+func applyFileConfig(c *cli.Context, path string) (*fileExtras, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
@@ -96,10 +102,7 @@ func applyFileConfig(c *cli.Context, path string) ([]string, error) {
 		}
 	}
 
-	var beaconExtra []string
-	for _, f := range fc.Consensus.Flags {
-		beaconExtra = append(beaconExtra, "--"+f)
-	}
+	extras := &fileExtras{GethSettings: fc.Execution.Settings}
 	if len(fc.Consensus.Settings) > 0 {
 		// Prysm's config-file loader silently ignores unknown keys, so a
 		// typo would become a silent no-op. Validate every key against the
@@ -130,7 +133,7 @@ func applyFileConfig(c *cli.Context, path string) ([]string, error) {
 		if err := tmp.Close(); err != nil {
 			return nil, err
 		}
-		beaconExtra = append(beaconExtra, "--config-file="+tmp.Name())
+		extras.BeaconArgs = append(extras.BeaconArgs, "--config-file="+tmp.Name())
 	}
-	return beaconExtra, nil
+	return extras, nil
 }

@@ -24,6 +24,7 @@ require (
 	github.com/ethereum/go-ethereum v1.17.4
 	github.com/ipfs/go-log/v2 v2.9.2
 	github.com/joonix/log v0.0.0-20260428191936-c4199ac32b4a
+	github.com/naoina/toml v0.1.2-0.20170918210437-9fafd6967416
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.4
 	github.com/urfave/cli/v2 v2.27.7
@@ -168,6 +169,7 @@ require (
 	github.com/multiformats/go-multistream v0.6.1 // indirect
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/naoina/go-stringutil v0.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/paulbellamy/ratecounter v0.2.0 // indirect

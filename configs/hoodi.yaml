@@ -9,3 +9,10 @@ consensus:
   # the full beacon flag surface is available here.
   settings:
     beacon-db-pruning: true
+
+# execution:
+#   settings: |            # geth-native TOML (`geth dumpconfig` format) —
+#     [Eth]                # the full geth option surface is available here.
+#     DatabaseCache = 4096
+#     [Node.P2P]
+#     MaxPeers = 100

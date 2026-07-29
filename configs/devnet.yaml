@@ -16,9 +16,9 @@ execution:
 consensus:
   genesis-state: ./run/genesis.ssz
   chain-config: ./devnet/config.yml
-  flags:
-    - no-discovery
-    - supernode
-    - min-sync-peers=0
-    - minimum-peers-per-subnet=0
-    - contract-deployment-block=0
+  settings:
+    no-discovery: true
+    supernode: true
+    min-sync-peers: 0
+    minimum-peers-per-subnet: 0
+    contract-deployment-block: 0

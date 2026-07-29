@@ -146,10 +146,10 @@ func runCommand() *cli.Command {
 }
 
 func runNode(c *cli.Context) error {
-	var beaconFileArgs []string
+	extras := &fileExtras{}
 	if path := c.String(configFlag.Name); path != "" {
 		var err error
-		if beaconFileArgs, err = applyFileConfig(c, path); err != nil {
+		if extras, err = applyFileConfig(c, path); err != nil {
 			return err
 		}
 	}
@@ -181,9 +181,10 @@ func runNode(c *cli.Context) error {
 		HTTPHost:    "127.0.0.1",
 		HTTPPort:    c.Int(httpPortFlag.Name),
 		AuthPort:    c.Int(authPortFlag.Name),
-		P2PListen:   p2pListen,
-		Verbosity:   c.String(verbosityFlag.Name),
-		MetricsPort: gethMetricsPort,
+		P2PListen:    p2pListen,
+		Verbosity:    c.String(verbosityFlag.Name),
+		MetricsPort:  gethMetricsPort,
+		SettingsTOML: extras.GethSettings,
 	})
 	if err != nil {
 		return fmt.Errorf("execution module failed to start: %w", err)
@@ -229,7 +230,7 @@ func runNode(c *cli.Context) error {
 	if v := c.String(clGenesisStateFlag.Name); v != "" {
 		beaconArgs = append(beaconArgs, fmt.Sprintf("--%s=%s", beacongenesis.StatePath.Name, v))
 	}
-	beaconArgs = append(beaconArgs, beaconFileArgs...)
+	beaconArgs = append(beaconArgs, extras.BeaconArgs...)
 	for _, f := range c.StringSlice(beaconFlagPassthrough.Name) {
 		beaconArgs = append(beaconArgs, "--"+f)
 	}

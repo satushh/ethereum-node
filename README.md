@@ -375,22 +375,31 @@ flags overriding file values and unset keys keeping each client's stock
 defaults. Examples in `configs/`:
 
 ```yaml
-node:                          # supervisor-level
-  datadir: ./run/hoodi-data
-  network: hoodi
-execution:                     # the exposed geth options (struct-mapped)
-  http-port: 8545
+node:                          # supervisor-level topology: datadir, network,
+  datadir: ./run/hoodi-data    # ports, verbosity, metrics — the keys the
+  network: hoodi               # supervisor itself needs to wire the two halves
+
+execution:
+  settings: |                  # THE FULL GETH OPTION SURFACE: geth-native
+    [Eth]                      # TOML, identical to `geth dumpconfig` output,
+    DatabaseCache = 4096       # decoded with geth's own semantics
+    [Node.P2P]
+    MaxPeers = 100
+
 consensus:
-  flags: [supernode]           # raw beacon switches (become argv tokens)
-  settings:                    # upstream prysm flag names, fed verbatim to
-    beacon-db-pruning: true    # prysm's own --config-file loader — the full
-                               # beacon flag surface, one operator file
+  settings:                    # THE FULL BEACON OPTION SURFACE: upstream
+    beacon-db-pruning: true    # prysm flag names, fed verbatim to prysm's
+    min-sync-peers: 0          # own --config-file loader
 ```
 
-Unknown keys fail loudly on both routes: `flags` through prysm's CLI parser,
-`settings` through an up-front check against the embedded beacon node's flag
-set (prysm's own file loader would silently skip typos). Choosing between
-them is ergonomics — switches vs typed values — not safety.
+One rule decides precedence: **supervisor-owned topology always wins** —
+datadir, the engine socket, ports, network posture and genesis come from the
+`node`/`execution` top-level keys (or CLI flags, which override file values);
+everything else is `settings`, delegated to each client's own loader. Typos
+fail loudly on both sides: unknown consensus keys are checked against the
+embedded beacon node's flag set, unknown execution fields get geth's own
+"field not defined in ethconfig.Config" error with a godoc link. For ad-hoc
+inline use without a file, `--beacon-flag <flag>` remains on the CLI.
 
 ```sh
 ethereum-node run --config configs/hoodi.yaml

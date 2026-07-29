@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
+	"strings"
+	"unicode"
 
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/core"
@@ -21,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/version"
+	"github.com/naoina/toml"
 )
 
 // Config carries the minimal set of options the combined binary exposes for
@@ -35,6 +39,54 @@ type Config struct {
 	P2PListen   string // devp2p listen address
 	Verbosity   string // silent|error|warn|info|debug|trace
 	MetricsPort int    // prometheus exporter on 127.0.0.1 (/debug/metrics/prometheus); 0 disables
+
+	// SettingsTOML is geth's complete option surface in geth's own config
+	// format (the output of `geth dumpconfig`: [Eth], [Node], [Node.P2P],
+	// [Metrics] sections). Decoded with the same semantics as
+	// `geth --config`, including erroring on unknown fields. Values above —
+	// the supervisor-owned topology (datadir, engine socket, ports, network
+	// posture, genesis) — always win over this section.
+	SettingsTOML string
+}
+
+// gethTomlConfig mirrors cmd/geth's gethConfig struct: the full
+// configuration surface of the embedded execution node.
+type gethTomlConfig struct {
+	Eth     ethconfig.Config
+	Node    node.Config
+	Metrics metrics.Config
+}
+
+// tomlSettings reproduces cmd/geth's decoder behavior: TOML keys are exact
+// Go field names, and unknown fields are an error pointing at the godoc of
+// the struct they failed to match.
+var tomlSettings = toml.Config{
+	NormFieldName: func(rt reflect.Type, key string) string { return key },
+	FieldToKey:    func(rt reflect.Type, field string) string { return field },
+	MissingField: func(rt reflect.Type, field string) error {
+		var link string
+		if unicode.IsUpper(rune(rt.Name()[0])) && rt.PkgPath() != "main" {
+			link = fmt.Sprintf(", see https://godoc.org/%s#%s for available fields", rt.PkgPath(), rt.Name())
+		}
+		return fmt.Errorf("field '%s' is not defined in %s%s", field, rt.String(), link)
+	},
+}
+
+// decodeSettings applies the optional TOML settings on top of upstream
+// defaults, yielding the base configuration the supervisor then overrides.
+func decodeSettings(settingsTOML string) (*gethTomlConfig, error) {
+	base := &gethTomlConfig{
+		Eth:     ethconfig.Defaults,
+		Node:    node.DefaultConfig,
+		Metrics: metrics.DefaultConfig,
+	}
+	if settingsTOML == "" {
+		return base, nil
+	}
+	if err := tomlSettings.NewDecoder(strings.NewReader(settingsTOML)).Decode(base); err != nil {
+		return nil, fmt.Errorf("execution.settings: %w", err)
+	}
+	return base, nil
 }
 
 // Node is a running embedded geth instance.
@@ -49,6 +101,10 @@ type Node struct {
 func Start(cfg Config) (*Node, error) {
 	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, verbosityLevel(cfg.Verbosity), false)))
 
+	base, err := decodeSettings(cfg.SettingsTOML)
+	if err != nil {
+		return nil, err
+	}
 	genesis, bootnodes, err := networkPreset(cfg)
 	if err != nil {
 		return nil, err
@@ -56,23 +112,26 @@ func Start(cfg Config) (*Node, error) {
 
 	// Must run before the eth service is constructed so its meters register
 	// against an enabled metrics registry (mirrors cmd/geth ordering).
+	metricsCfg := base.Metrics
 	if cfg.MetricsPort > 0 {
-		metricsCfg := metrics.DefaultConfig
 		metricsCfg.Enabled = true
 		metricsCfg.HTTP = "127.0.0.1"
 		metricsCfg.Port = cfg.MetricsPort
+	}
+	if metricsCfg.Enabled {
 		utils.SetupMetrics(&metricsCfg)
 	}
 
-	nodeCfg := node.DefaultConfig
+	nodeCfg := base.Node
 	nodeCfg.Name = "geth"
 	nodeCfg.Version = fmt.Sprintf("%d.%d.%d-%s", version.Major, version.Minor, version.Patch, version.Meta)
 	nodeCfg.DataDir = cfg.DataDir
 	nodeCfg.IPCPath = "geth.ipc"
 	nodeCfg.HTTPHost = cfg.HTTPHost
 	nodeCfg.HTTPPort = cfg.HTTPPort
-	nodeCfg.HTTPModules = []string{"eth", "net", "web3", "txpool"}
-	nodeCfg.HTTPVirtualHosts = []string{"localhost"}
+	if len(nodeCfg.HTTPModules) == 0 {
+		nodeCfg.HTTPModules = []string{"eth", "net", "web3", "txpool"}
+	}
 	nodeCfg.AuthAddr = "127.0.0.1"
 	nodeCfg.AuthPort = cfg.AuthPort
 	nodeCfg.P2P.ListenAddr = cfg.P2PListen
@@ -94,7 +153,7 @@ func Start(cfg Config) (*Node, error) {
 		return nil, fmt.Errorf("create geth node stack: %w", err)
 	}
 
-	ethCfg := ethconfig.Defaults
+	ethCfg := base.Eth
 	ethCfg.Genesis = genesis
 	ethCfg.NetworkId = genesis.Config.ChainID.Uint64()
 	if cfg.Network != "" {
@@ -165,7 +224,7 @@ func networkPreset(cfg Config) (*core.Genesis, []*enode.Node, error) {
 
 func loadGenesis(path string) (*core.Genesis, error) {
 	if path == "" {
-		return nil, fmt.Errorf("no execution genesis file configured (public network presets are not wired up yet; pass --el-genesis)")
+		return nil, fmt.Errorf("no execution genesis configured: pass --network=<hoodi|sepolia|mainnet> for a public network or --el-genesis for a devnet")
 	}
 	f, err := os.Open(path)
 	if err != nil {
