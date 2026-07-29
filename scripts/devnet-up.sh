@@ -45,18 +45,8 @@ echo ">> generating genesis (delay ${DELAY}s)"
     --geth-genesis-json-out=run/genesis.json \
     --output-ssz=run/genesis.ssz
 
-echo ">> starting ethereum-node (geth + prysm beacon, one process)"
-./bin/ethereum-node run \
-    --datadir=run/data \
-    --el-genesis=run/genesis.json \
-    --cl-genesis-state=run/genesis.ssz \
-    --cl-chain-config=devnet/config.yml \
-    --beacon-flag no-discovery \
-    --beacon-flag supernode \
-    --beacon-flag min-sync-peers=0 \
-    --beacon-flag minimum-peers-per-subnet=0 \
-    --beacon-flag contract-deployment-block=0 \
-    > run/logs/node.log 2>&1 &
+echo ">> starting ethereum-node (geth + prysm beacon, one process; config: configs/devnet.yaml)"
+./bin/ethereum-node run --config configs/devnet.yaml > run/logs/node.log 2>&1 &
 echo "   pid $! (logs: run/logs/node.log)"
 
 echo ">> starting prysm validator (separate process)"

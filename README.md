@@ -19,6 +19,7 @@ cd ethereum-node
 go build -o bin/ethereum-node ./cmd/ethereum-node
 
 scripts/devnet-up.sh               # devnet: node + validator + grafana, one command
+                                   # (node config: configs/devnet.yaml)
 tail -f run/logs/node.log          # geth + prysm logs, one process, one stream
 open http://127.0.0.1:3001         # dashboards (needs docker; skipped if absent)
 
@@ -33,7 +34,8 @@ dashboard; checkpoint sync puts the beacon at head in minutes, geth's snap
 sync then needs hours and tens of GB):
 
 ```sh
-scripts/testnet-up.sh hoodi
+scripts/testnet-up.sh hoodi        # equivalently:
+./bin/ethereum-node run --config configs/hoodi.yaml
 ```
 
 Blocks appear within ~1 minute; finalization after ~13 minutes (2 epochs).

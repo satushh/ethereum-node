@@ -29,11 +29,15 @@ if [ "${NO_OBSERVABILITY:-0}" != "1" ]; then
     fi
 fi
 
-echo ">> starting ethereum-node on ${NETWORK} (datadir ${DATADIR})"
-./bin/ethereum-node run \
-    --network="${NETWORK}" \
-    --datadir="${DATADIR}" \
-    > "run/logs/${NETWORK}.log" 2>&1 &
+if [ -f "configs/${NETWORK}.yaml" ]; then
+    echo ">> starting ethereum-node on ${NETWORK} (config: configs/${NETWORK}.yaml)"
+    ./bin/ethereum-node run --config "configs/${NETWORK}.yaml" \
+        > "run/logs/${NETWORK}.log" 2>&1 &
+else
+    echo ">> starting ethereum-node on ${NETWORK} (no configs/${NETWORK}.yaml; using flags)"
+    ./bin/ethereum-node run --network="${NETWORK}" --datadir="${DATADIR}" \
+        > "run/logs/${NETWORK}.log" 2>&1 &
+fi
 echo "   pid $! (logs: run/logs/${NETWORK}.log)"
 
 echo ">> watch it:"
