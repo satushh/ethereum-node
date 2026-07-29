@@ -2116,30 +2116,28 @@
  "templating": {
   "list": [
    {
-    "description": null,
-    "error": null,
-    "hide": 2,
-    "label": "job",
     "name": "job",
-    "query": "${VAR_JOB}",
-    "skipUrlSync": false,
-    "type": "constant",
-    "current": {
-     "value": "${VAR_JOB}",
-     "text": "${VAR_JOB}",
-     "selected": false
-    },
-    "options": [
-     {
-      "value": "${VAR_JOB}",
-      "text": "${VAR_JOB}",
-      "selected": false
-     }
-    ],
+    "label": "job",
+    "type": "query",
     "datasource": {
      "type": "prometheus",
      "uid": "prometheus"
-    }
+    },
+    "query": {
+     "query": "label_values(chain_head_block, job)",
+     "refId": "job"
+    },
+    "refresh": 1,
+    "includeAll": false,
+    "multi": false,
+    "sort": 0,
+    "current": {
+     "selected": false,
+     "text": "geth",
+     "value": "geth"
+    },
+    "options": [],
+    "hide": 0
    },
    {
     "allValue": null,
@@ -2260,6 +2258,6 @@
  "timezone": "",
  "title": "Geth node (detailed)",
  "uid": "geth-node-detailed",
- "version": 17,
+ "version": 18,
  "description": "Geth metrics overview dashboard."
 }
