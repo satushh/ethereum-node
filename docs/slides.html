@@ -68,6 +68,7 @@ cd ethereum-node &amp;&amp; go build -o bin/ethereum-node ./cmd/ethereum-node
 # one-command local devnet: genesis + combined node + validator
 scripts/devnet-up.sh
 tail -f run/logs/node.log      # geth + prysm lines in one stream
+scripts/observability-up.sh    # grafana dashboard at :3001
 
 # watch it work
 curl -s localhost:8545 -d '{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}'

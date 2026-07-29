@@ -310,6 +310,31 @@ curl -s http://127.0.0.1:3500/eth/v1/beacon/headers/head
 Stop with a single Ctrl-C / SIGTERM: Prysm's signal handler shuts the beacon
 module down, after which the supervisor closes the geth stack.
 
+## Observability
+
+Metrics are on by default (`--metrics`, on 127.0.0.1 only): geth's exporter
+at `:6060/debug/metrics/prometheus`, the beacon node at `:8080/metrics`, and
+the devnet validator at `:8081/metrics`. A ready-made Prometheus + Grafana
+stack (the node runs natively; only these two run in Docker) lives in
+`observability/` — a trimmed-down cousin of
+[nalepae/infra](https://github.com/nalepae/infra):
+
+```sh
+scripts/observability-up.sh        # grafana: http://127.0.0.1:3001 (no login)
+scripts/observability-up.sh down
+```
+
+The auto-provisioned **ethereum-node** dashboard shows both halves of the
+process on one screen: CL head slot / justified / finalized epochs next to
+the EL head block, CL and EL peer counts, state-transition timing, memory of
+all three processes, and per-module `up` status. One quirk found while
+building it: geth v1.17.4 declares `chain/inserts` but never updates it
+(dead metric upstream), so block-processing timing comes from the Prysm side
+(`state_transition_processing_milliseconds`).
+
+This is still two metrics stacks scraped separately — collapsing them into
+one root-owned registry is future-work #2.
+
 ## Subcommands
 
 - `run` — the combined node. `--datadir` gets `execution/` and `beacon/`
@@ -326,6 +351,11 @@ module down, after which the supervisor closes the geth stack.
 - `version` — reports the versions of both bundled components.
 
 ## Future work — and what each item buys
+
+**Status:** devnet observability is done (see the Observability section);
+the immediate next milestone is item 1 — v0.2, `--network=hoodi` plus the
+single config file, network wiring first so the config schema is designed
+against the real use-case.
 
 Roughly in implementation order:
 
