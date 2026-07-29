@@ -68,7 +68,8 @@ echo ">> starting prysm validator (separate process)"
     --wallet-dir=run/wallet \
     --wallet-password-file=run/wallet/password.txt \
     --suggested-fee-recipient="${FEE_RECIPIENT}" \
-    --disable-monitoring \
+    --monitoring-host=127.0.0.1 \
+    --monitoring-port=8081 \
     > run/logs/validator.log 2>&1 &
 echo "   pid $! (logs: run/logs/validator.log)"
 

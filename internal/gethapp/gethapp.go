@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/catalyst"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/version"
 )
@@ -29,6 +30,7 @@ type Config struct {
 	AuthPort    int    // authenticated engine API port (escape hatch for external CLs; the embedded CL uses IPC)
 	P2PListen   string // devp2p listen address
 	Verbosity   string // silent|error|warn|info|debug|trace
+	MetricsPort int    // prometheus exporter on 127.0.0.1 (/debug/metrics/prometheus); 0 disables
 }
 
 // Node is a running embedded geth instance.
@@ -46,6 +48,16 @@ func Start(cfg Config) (*Node, error) {
 	genesis, err := loadGenesis(cfg.GenesisPath)
 	if err != nil {
 		return nil, err
+	}
+
+	// Must run before the eth service is constructed so its meters register
+	// against an enabled metrics registry (mirrors cmd/geth ordering).
+	if cfg.MetricsPort > 0 {
+		metricsCfg := metrics.DefaultConfig
+		metricsCfg.Enabled = true
+		metricsCfg.HTTP = "127.0.0.1"
+		metricsCfg.Port = cfg.MetricsPort
+		utils.SetupMetrics(&metricsCfg)
 	}
 
 	nodeCfg := node.DefaultConfig

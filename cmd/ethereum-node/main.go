@@ -74,6 +74,11 @@ var (
 		Usage: "Log level for both modules (error|warn|info|debug|trace)",
 		Value: "info",
 	}
+	metricsFlag = &cli.BoolFlag{
+		Name:  "metrics",
+		Usage: "Expose prometheus metrics on 127.0.0.1 (geth :6060/debug/metrics/prometheus, beacon :8080/metrics)",
+		Value: true,
+	}
 	beaconFlagPassthrough = &cli.StringSliceFlag{
 		Name:  "beacon-flag",
 		Usage: "Extra flag for the embedded beacon node, without leading dashes (repeatable), e.g. --beacon-flag supernode",
@@ -120,7 +125,7 @@ func runCommand() *cli.Command {
 		Flags: []cli.Flag{
 			datadirFlag, elGenesisFlag, clGenesisStateFlag, clChainConfigFlag,
 			httpPortFlag, authPortFlag, p2pListenFlag, feeRecipientFlag,
-			verbosityFlag, beaconFlagPassthrough,
+			verbosityFlag, metricsFlag, beaconFlagPassthrough,
 		},
 		Action: runNode,
 	}
@@ -136,6 +141,10 @@ func runNode(c *cli.Context) error {
 	fmt.Printf("  execution: geth v%d.%d.%d-%s -> %s\n", gethversion.Major, gethversion.Minor, gethversion.Patch, gethversion.Meta, filepath.Join(datadir, "execution"))
 	fmt.Printf("  consensus: prysm %s -> %s\n", prysmversion.Version(), filepath.Join(datadir, "beacon"))
 
+	gethMetricsPort := 0
+	if c.Bool(metricsFlag.Name) {
+		gethMetricsPort = 6060
+	}
 	gethNode, err := gethapp.Start(gethapp.Config{
 		DataDir:     filepath.Join(datadir, "execution"),
 		GenesisPath: c.String(elGenesisFlag.Name),
@@ -144,6 +153,7 @@ func runNode(c *cli.Context) error {
 		AuthPort:    c.Int(authPortFlag.Name),
 		P2PListen:   c.String(p2pListenFlag.Name),
 		Verbosity:   c.String(verbosityFlag.Name),
+		MetricsPort: gethMetricsPort,
 	})
 	if err != nil {
 		return fmt.Errorf("execution module failed to start: %w", err)
@@ -163,7 +173,14 @@ func runNode(c *cli.Context) error {
 		fmt.Sprintf("--%s=%s", beaconflags.ExecutionEngineEndpoint.Name, gethNode.IPCEndpoint()),
 		fmt.Sprintf("--%s=%s", beaconflags.SuggestedFeeRecipient.Name, c.String(feeRecipientFlag.Name)),
 		fmt.Sprintf("--%s=%s", prysmcmd.VerbosityFlag.Name, c.String(verbosityFlag.Name)),
-		"--" + prysmcmd.DisableMonitoringFlag.Name,
+	}
+	if c.Bool(metricsFlag.Name) {
+		beaconArgs = append(beaconArgs,
+			fmt.Sprintf("--%s=127.0.0.1", prysmcmd.MonitoringHostFlag.Name),
+			fmt.Sprintf("--%s=8080", beaconflags.MonitoringPortFlag.Name),
+		)
+	} else {
+		beaconArgs = append(beaconArgs, "--"+prysmcmd.DisableMonitoringFlag.Name)
 	}
 	if v := c.String(clChainConfigFlag.Name); v != "" {
 		beaconArgs = append(beaconArgs, fmt.Sprintf("--%s=%s", prysmcmd.ChainConfigFileFlag.Name, v))
