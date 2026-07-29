@@ -299,6 +299,19 @@ func before(ctx *cli.Context) error {
 	return cmd.ValidateNoArgs(ctx)
 }
 
+// KnownFlags reports every flag name (including aliases) the embedded beacon
+// node accepts, so callers can validate config keys up front instead of
+// relying on the silent-skip behavior of prysm's config-file loader.
+func KnownFlags() map[string]bool {
+	known := make(map[string]bool)
+	for _, f := range appFlags {
+		for _, name := range f.Names() {
+			known[name] = true
+		}
+	}
+	return known
+}
+
 // Run executes the beacon node with the given argument vector (args[0] is the
 // program name, mirroring os.Args). It blocks until the node shuts down,
 // either because the process received SIGINT/SIGTERM (Prysm installs its own

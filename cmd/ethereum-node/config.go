@@ -7,6 +7,8 @@ import (
 
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v3"
+
+	"github.com/satushh/ethereum-node/internal/prysmapp"
 )
 
 // fileConfig is the single config file for both halves of the node:
@@ -99,6 +101,19 @@ func applyFileConfig(c *cli.Context, path string) ([]string, error) {
 		beaconExtra = append(beaconExtra, "--"+f)
 	}
 	if len(fc.Consensus.Settings) > 0 {
+		// Prysm's config-file loader silently ignores unknown keys, so a
+		// typo would become a silent no-op. Validate every key against the
+		// embedded beacon node's actual flag set and fail loudly instead.
+		known := prysmapp.KnownFlags()
+		var unknown []string
+		for key := range fc.Consensus.Settings {
+			if !known[key] {
+				unknown = append(unknown, key)
+			}
+		}
+		if len(unknown) > 0 {
+			return nil, fmt.Errorf("consensus.settings contains keys the beacon node does not recognize: %v", unknown)
+		}
 		// Hand the settings map to prysm's own config-file loader: full
 		// upstream flag surface, upstream parsing, one operator file.
 		out, err := yaml.Marshal(fc.Consensus.Settings)

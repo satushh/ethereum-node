@@ -381,11 +381,16 @@ node:                          # supervisor-level
 execution:                     # the exposed geth options (struct-mapped)
   http-port: 8545
 consensus:
-  flags: [supernode]           # raw beacon switches
+  flags: [supernode]           # raw beacon switches (become argv tokens)
   settings:                    # upstream prysm flag names, fed verbatim to
     beacon-db-pruning: true    # prysm's own --config-file loader — the full
                                # beacon flag surface, one operator file
 ```
+
+Unknown keys fail loudly on both routes: `flags` through prysm's CLI parser,
+`settings` through an up-front check against the embedded beacon node's flag
+set (prysm's own file loader would silently skip typos). Choosing between
+them is ergonomics — switches vs typed values — not safety.
 
 ```sh
 ethereum-node run --config configs/hoodi.yaml
