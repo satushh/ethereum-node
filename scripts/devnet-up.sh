@@ -73,7 +73,17 @@ echo ">> starting prysm validator (separate process)"
     > run/logs/validator.log 2>&1 &
 echo "   pid $! (logs: run/logs/validator.log)"
 
+if [ "${NO_OBSERVABILITY:-0}" != "1" ]; then
+    if docker info >/dev/null 2>&1; then
+        echo ">> starting prometheus + grafana"
+        "$(dirname "$0")/observability-up.sh"
+    else
+        echo ">> docker not available; skipping prometheus/grafana (NO_OBSERVABILITY=1 silences this)"
+    fi
+fi
+
 echo ">> devnet coming up; genesis in ${DELAY}s. Watch it with:"
+echo "   grafana:  http://127.0.0.1:3001  (dashboards: ethereum-node, Beacon node)"
 echo "   tail -f run/logs/node.log"
 echo "   curl -s -X POST -H 'Content-Type: application/json' \\"
 echo "     -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' http://127.0.0.1:8545"

@@ -18,22 +18,22 @@ git clone https://github.com/satushh/ethereum-node.git
 cd ethereum-node
 go build -o bin/ethereum-node ./cmd/ethereum-node
 
-scripts/devnet-up.sh               # local devnet: combined node + validator client
+scripts/devnet-up.sh               # devnet: node + validator + grafana, one command
 tail -f run/logs/node.log          # geth + prysm logs, one process, one stream
+open http://127.0.0.1:3001         # dashboards (needs docker; skipped if absent)
 
 # watch it produce and finalize blocks
 curl -s localhost:8545 -X POST -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 curl -s localhost:3500/eth/v1/beacon/states/head/finality_checkpoints
-
-scripts/observability-up.sh        # optional: grafana at http://127.0.0.1:3001
 ```
 
-Or join a public testnet instead of the devnet (checkpoint sync puts the
-beacon at head in minutes; geth's snap sync then needs hours and tens of GB):
+Or join a public testnet instead of the devnet (also brings up the
+dashboard; checkpoint sync puts the beacon at head in minutes, geth's snap
+sync then needs hours and tens of GB):
 
 ```sh
-./bin/ethereum-node run --network=hoodi --datadir=./hoodi-data
+scripts/testnet-up.sh hoodi
 ```
 
 Blocks appear within ~1 minute; finalization after ~13 minutes (2 epochs).
@@ -603,3 +603,46 @@ convenience could exist later; the default split stays.
 `internal/prysmapp/` is a copy of GPL-3.0 Prysm code and the binary links
 geth (LGPL-3.0/GPL-3.0), so this repo must carry a GPL-3.0 LICENSE before
 any distribution of source or binaries.
+
+## Upstream observations
+
+Small gaps and paper cuts noticed in the clients while composing them — none
+serious, all candidates for upstream issues/PRs. Kept here so they don't get
+lost.
+
+**go-ethereum (v1.17.4):**
+
+- `chain/inserts` (`core/blockchain.go:102`) is declared but never updated —
+  a dead metric. There is consequently no exported block-import timing
+  summary; dashboards must take timing from the CL side.
+- `cmd/utils.RegisterEthService` and friends call `Fatalf` (process exit)
+  instead of returning errors — hostile to embedding, which the rest of the
+  geth API surface is otherwise very good at.
+- An IPC path longer than the OS socket limit (~104 chars on macOS) warns but
+  then fails with a cryptic `bind: invalid argument`; failing fast with the
+  warning's text would save operators a confused minute.
+
+**Prysm (develop @ ce28535):**
+
+- `genesis/initialize.go:41` logs `genesis provider failed` *without the
+  underlying error* (`err` is dropped). A misconfigured checkpoint URL is
+  invisible: the run dies later with a generic "genesis state has not been
+  initialized". One `WithError(err)` fixes it.
+- No latency histograms for `engine_newPayload` / `engine_forkchoiceUpdated`
+  (only the getBlobs family has duration metrics) — the two hottest engine
+  calls are unobservable without log parsing.
+- `cmd/beacon-chain` is `package main` with configuration read through the
+  `cli.Context` across packages, so embedding requires copying `main.go`. An
+  importable app package (e.g. `runtime/beaconapp`) would make the beacon
+  node composable; this repo is the concrete consumer.
+- The replace directives in go.mod burden every downstream consumer (Go
+  ignores replaces in dependencies): the vendored `third_party/go-bip39` is
+  functionally identical to upstream `tyler-smith/go-bip39@v1.1.0` and looks
+  Bazel-era; the json-iterator fork pin may also be worth revisiting.
+- With `--interop-num-validators` deprecated, spinning up devnet validators
+  requires a full wallet ceremony around the deterministic interop keys
+  (this repo grew a `devnet-wallet` command for it); a supported lightweight
+  devnet path would be friendlier.
+- At startup on a fresh chain, eth1 follow-distance checks log at ERROR level
+  ("Beacon node is not respecting the follow distance") for a benign,
+  self-resolving condition — WARN would match its severity.
