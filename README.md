@@ -29,6 +29,13 @@ curl -s localhost:3500/eth/v1/beacon/states/head/finality_checkpoints
 scripts/observability-up.sh        # optional: grafana at http://127.0.0.1:3001
 ```
 
+Or join a public testnet instead of the devnet (checkpoint sync puts the
+beacon at head in minutes; geth's snap sync then needs hours and tens of GB):
+
+```sh
+./bin/ethereum-node run --network=hoodi --datadir=./hoodi-data
+```
+
 Blocks appear within ~1 minute; finalization after ~13 minutes (2 epochs).
 Stop: Ctrl-C (or kill) stops both halves cleanly;
 `scripts/observability-up.sh down` for the dashboard. Laptop note: system
@@ -338,6 +345,29 @@ curl -s http://127.0.0.1:3500/eth/v1/beacon/headers/head
 Stop with a single Ctrl-C / SIGTERM: Prysm's signal handler shuts the beacon
 module down, after which the supervisor closes the geth stack.
 
+## Run on a public testnet (Hoodi)
+
+```sh
+./bin/ethereum-node run --network=hoodi --datadir=./hoodi-data
+```
+
+`--network` (hoodi|sepolia|mainnet) switches both halves to upstream presets:
+geth gets its built-in genesis, bootnodes, discovery and snap sync; the
+beacon gets Prysm's network flag plus checkpoint sync
+(`--checkpoint-sync-url`, default `https://checkpoint-sync.<network>.ethpandaops.io`).
+What to expect on Hoodi:
+
+- Beacon at the network head within minutes (checkpoint sync, ~13 peers on
+  first try); blocks import optimistically while the EL catches up.
+- Geth snap sync is the long pole: hours, and the bulk of the disk. Budget
+  ~150 GB for comfort; expect meaningfully less used in practice.
+- Keep disk small: the defaults already avoid the expensive choices — no
+  `--supernode` (custodies only a fraction of PeerDAS columns), no backfill,
+  blob/column data self-prunes after ~18 days. Add
+  `--beacon-flag beacon-db-pruning` to cap the beacon DB too.
+- No validator keys are involved; this is a following node. The validator
+  client remains separate and optional.
+
 ## Observability
 
 Metrics are on by default (`--metrics`, on 127.0.0.1 only): geth's exporter
@@ -352,8 +382,11 @@ scripts/observability-up.sh        # grafana: http://127.0.0.1:3001 (no login)
 scripts/observability-up.sh down
 ```
 
-The auto-provisioned **ethereum-node** dashboard shows both halves of the
-process on one screen: CL head slot / justified / finalized epochs next to
+Two dashboards are auto-provisioned: **Beacon node (detailed)** — adapted
+from [nalepae/infra](https://github.com/nalepae/infra), 79 panels, minus the
+few needing log/trace datasources this stack doesn't run — and the compact
+**ethereum-node** dashboard, which shows both halves of the process on one
+screen: CL head slot / justified / finalized epochs next to
 the EL head block, CL and EL peer counts, state-transition timing, memory of
 all three processes, and per-module `up` status. One quirk found while
 building it: geth v1.17.4 declares `chain/inserts` but never updates it
@@ -380,10 +413,10 @@ one root-owned registry is future-work #2.
 
 ## Future work — and what each item buys
 
-**Status:** devnet observability is done (see the Observability section);
-the immediate next milestone is item 1 — v0.2, `--network=hoodi` plus the
-single config file, network wiring first so the config schema is designed
-against the real use-case.
+**Status:** devnet observability is done, and the network-preset half of
+item 1 shipped (`--network=hoodi|sepolia|mainnet`, verified live on Hoodi).
+The immediate next milestone is the remaining half of item 1 — the single
+config file — followed by root-owned globals (item 2).
 
 Roughly in implementation order:
 
