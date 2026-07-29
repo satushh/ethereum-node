@@ -2,7 +2,7 @@
  "title": "ethereum-node (combined geth + prysm)",
  "uid": "ethereum-node",
  "schemaVersion": 39,
- "version": 2,
+ "version": 3,
  "refresh": "5s",
  "time": {
   "from": "now-30m",
@@ -63,7 +63,7 @@
   {
    "id": 2,
    "type": "stat",
-   "title": "Beacon head slot",
+   "title": "CL: beacon head slot",
    "gridPos": {
     "x": 4,
     "y": 0,
@@ -91,7 +91,7 @@
   {
    "id": 3,
    "type": "stat",
-   "title": "Execution head block",
+   "title": "EL: head block",
    "gridPos": {
     "x": 8,
     "y": 0,
@@ -119,7 +119,7 @@
   {
    "id": 4,
    "type": "stat",
-   "title": "Justified epoch",
+   "title": "CL: justified epoch",
    "gridPos": {
     "x": 12,
     "y": 0,
@@ -147,7 +147,7 @@
   {
    "id": 5,
    "type": "stat",
-   "title": "Finalized epoch",
+   "title": "CL: finalized epoch",
    "gridPos": {
     "x": 16,
     "y": 0,
@@ -194,7 +194,7 @@
   {
    "id": 6,
    "type": "stat",
-   "title": "Reorgs",
+   "title": "CL: reorgs",
    "gridPos": {
     "x": 20,
     "y": 0,
@@ -222,7 +222,7 @@
   {
    "id": 7,
    "type": "timeseries",
-   "title": "Chain progress (CL slot / EL block)",
+   "title": "CL+EL: chain progress (slot vs block)",
    "gridPos": {
     "x": 0,
     "y": 4,
@@ -254,7 +254,7 @@
   {
    "id": 8,
    "type": "timeseries",
-   "title": "Peers (CL libp2p / EL devp2p)",
+   "title": "CL+EL: peers (libp2p vs devp2p)",
    "gridPos": {
     "x": 12,
     "y": 4,
@@ -281,7 +281,7 @@
   {
    "id": 9,
    "type": "timeseries",
-   "title": "CL block processing (state transition avg)",
+   "title": "CL: block processing (state transition avg)",
    "gridPos": {
     "x": 0,
     "y": 13,
@@ -309,7 +309,7 @@
   {
    "id": 10,
    "type": "timeseries",
-   "title": "Memory (RSS / geth heap used)",
+   "title": "CL+EL: memory (beacon/validator RSS, geth heap)",
    "gridPos": {
     "x": 8,
     "y": 13,
@@ -342,7 +342,7 @@
   {
    "id": 11,
    "type": "timeseries",
-   "title": "Txpool pending / goroutines",
+   "title": "CL: process CPU (beacon / validator)",
    "gridPos": {
     "x": 16,
     "y": 13,
@@ -355,16 +355,17 @@
    },
    "targets": [
     {
-     "expr": "txpool_pending",
-     "legendFormat": "txpool pending",
+     "expr": "rate(process_cpu_seconds_total{job=~\"beacon|validator\"}[2m])",
+     "legendFormat": "{{job}}",
      "refId": "A"
-    },
-    {
-     "expr": "system_cpu_goroutines",
-     "legendFormat": "goroutines (whole process)",
-     "refId": "B"
     }
-   ]
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   }
   },
   {
    "id": 20,
@@ -382,7 +383,7 @@
   {
    "id": 21,
    "type": "timeseries",
-   "title": "EL head pointers (fcU-driven)",
+   "title": "EL: head pointers (fcU-driven)",
    "gridPos": {
     "x": 0,
     "y": 22,
@@ -414,7 +415,7 @@
   {
    "id": 22,
    "type": "timeseries",
-   "title": "Txpool",
+   "title": "EL: txpool",
    "gridPos": {
     "x": 8,
     "y": 22,
@@ -446,7 +447,7 @@
   {
    "id": 23,
    "type": "timeseries",
-   "title": "Chain DB size",
+   "title": "EL: chain DB size",
    "gridPos": {
     "x": 16,
     "y": 22,
@@ -479,7 +480,7 @@
   {
    "id": 24,
    "type": "timeseries",
-   "title": "devp2p bandwidth",
+   "title": "EL: devp2p bandwidth",
    "gridPos": {
     "x": 0,
     "y": 22,
@@ -512,7 +513,7 @@
   {
    "id": 25,
    "type": "timeseries",
-   "title": "RPC served (incl. engine over IPC)",
+   "title": "EL: RPC served (incl. engine over IPC)",
    "gridPos": {
     "x": 8,
     "y": 22,
@@ -545,7 +546,7 @@
   {
    "id": 26,
    "type": "timeseries",
-   "title": "Geth CPU / goroutines",
+   "title": "EL: CPU / goroutines",
    "gridPos": {
     "x": 16,
     "y": 22,
