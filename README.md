@@ -272,7 +272,7 @@ ethereum-node/
 Both clients resolve from the Go module proxy — a single clone builds:
 
 ```sh
-git clone <this-repo> ethereum-node
+git clone https://github.com/satushh/ethereum-node.git ethereum-node
 cd ethereum-node
 go build -o bin/ethereum-node ./cmd/ethereum-node   # Go >= 1.26.5 (auto-downloaded)
 ```
