@@ -40,13 +40,15 @@ type Config struct {
 	Verbosity   string // silent|error|warn|info|debug|trace
 	MetricsPort int    // prometheus exporter on 127.0.0.1 (/debug/metrics/prometheus); 0 disables
 
-	// SettingsTOML is geth's complete option surface in geth's own config
-	// format (the output of `geth dumpconfig`: [Eth], [Node], [Node.P2P],
-	// [Metrics] sections). Decoded with the same semantics as
-	// `geth --config`, including erroring on unknown fields. Values above —
-	// the supervisor-owned topology (datadir, engine socket, ports, network
-	// posture, genesis) — always win over this section.
-	SettingsTOML string
+	// SettingsTOML chunks are geth's complete option surface in geth's own
+	// config format (the output of `geth dumpconfig`: [Eth], [Node],
+	// [Node.P2P], [Metrics] sections). Chunks are decoded in order, later
+	// chunks overriding earlier ones (file first, inline flags after), with
+	// the same semantics as `geth --config`, including erroring on unknown
+	// fields. The fields above — the supervisor-owned topology (datadir,
+	// engine socket, ports, network posture, genesis) — always win over
+	// this section.
+	SettingsTOML []string
 }
 
 // gethTomlConfig mirrors cmd/geth's gethConfig struct: the full
@@ -72,19 +74,22 @@ var tomlSettings = toml.Config{
 	},
 }
 
-// decodeSettings applies the optional TOML settings on top of upstream
-// defaults, yielding the base configuration the supervisor then overrides.
-func decodeSettings(settingsTOML string) (*gethTomlConfig, error) {
+// decodeSettings applies the optional TOML settings chunks in order on top
+// of upstream defaults, yielding the base configuration the supervisor then
+// overrides.
+func decodeSettings(chunks []string) (*gethTomlConfig, error) {
 	base := &gethTomlConfig{
 		Eth:     ethconfig.Defaults,
 		Node:    node.DefaultConfig,
 		Metrics: metrics.DefaultConfig,
 	}
-	if settingsTOML == "" {
-		return base, nil
-	}
-	if err := tomlSettings.NewDecoder(strings.NewReader(settingsTOML)).Decode(base); err != nil {
-		return nil, fmt.Errorf("execution.settings: %w", err)
+	for _, chunk := range chunks {
+		if chunk == "" {
+			continue
+		}
+		if err := tomlSettings.NewDecoder(strings.NewReader(chunk)).Decode(base); err != nil {
+			return nil, fmt.Errorf("execution settings: %w", err)
+		}
 	}
 	return base, nil
 }

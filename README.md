@@ -451,8 +451,12 @@ datadir, the engine socket, ports, network posture and genesis come from the
 everything else is `settings`, delegated to each client's own loader. Typos
 fail loudly on both sides: unknown consensus keys are checked against the
 embedded beacon node's flag set, unknown execution fields get geth's own
-"field not defined in ethconfig.Config" error with a godoc link. For ad-hoc
-inline use without a file, `--beacon-flag <flag>` remains on the CLI.
+"field not defined in ethconfig.Config" error with a godoc link.
+
+Everything in the file has an inline equivalent and vice versa: the
+supervisor keys are the CLI flags, `consensus.settings` ↔
+`--beacon-flag key=value`, and `execution.settings` ↔ repeated
+`--el-setting` TOML lines (inline overrides file everywhere).
 
 ```sh
 ethereum-node run --config configs/hoodi.yaml

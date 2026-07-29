@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	prysmcmd "github.com/OffchainLabs/prysm/v7/cmd"
 	beaconflags "github.com/OffchainLabs/prysm/v7/cmd/beacon-chain/flags"
@@ -96,6 +97,10 @@ var (
 		Name:  "beacon-flag",
 		Usage: "Extra flag for the embedded beacon node, without leading dashes (repeatable), e.g. --beacon-flag supernode",
 	}
+	elSettingFlag = &cli.StringSliceFlag{
+		Name:  "el-setting",
+		Usage: "Inline geth TOML for the embedded execution node (repeatable, lines join in order), e.g. --el-setting '[Eth]' --el-setting 'DatabaseCache = 4096'. Overrides execution.settings from --config",
+	}
 	walletDirFlag = &cli.StringFlag{
 		Name:  "wallet-dir",
 		Usage: "Directory for the generated validator wallet",
@@ -139,7 +144,7 @@ func runCommand() *cli.Command {
 			configFlag, datadirFlag, networkFlag, checkpointURLFlag,
 			elGenesisFlag, clGenesisStateFlag, clChainConfigFlag,
 			httpPortFlag, authPortFlag, p2pListenFlag, feeRecipientFlag,
-			verbosityFlag, metricsFlag, beaconFlagPassthrough,
+			verbosityFlag, metricsFlag, beaconFlagPassthrough, elSettingFlag,
 		},
 		Action: runNode,
 	}
@@ -184,7 +189,7 @@ func runNode(c *cli.Context) error {
 		P2PListen:    p2pListen,
 		Verbosity:    c.String(verbosityFlag.Name),
 		MetricsPort:  gethMetricsPort,
-		SettingsTOML: extras.GethSettings,
+		SettingsTOML: []string{extras.GethSettings, strings.Join(c.StringSlice(elSettingFlag.Name), "\n")},
 	})
 	if err != nil {
 		return fmt.Errorf("execution module failed to start: %w", err)
