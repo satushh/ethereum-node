@@ -1,0 +1,38 @@
+# Prometheus + Grafana for a locally-running ethereum-node.
+# The node itself runs natively on the host; only the observability stack is
+# containerized. Trimmed-down cousin of https://github.com/nalepae/infra
+# (which also runs the clients, logs, traces and profiling in compose).
+services:
+  prometheus:
+    container_name: ethereum-node-prometheus
+    image: prom/prometheus:v3.6.0
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus:/prometheus
+    ports:
+      - 127.0.0.1:9090:9090
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+  grafana:
+    container_name: ethereum-node-grafana
+    image: grafana/grafana:12.4
+    restart: unless-stopped
+    environment:
+      # Local-only stack: no login, straight to the dashboard.
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - grafana:/var/lib/grafana
+      - ./grafana/dashboards.yaml:/etc/grafana/provisioning/dashboards/default.yml
+      - ./grafana/datasources.yaml:/etc/grafana/provisioning/datasources/default.yml
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      # 3001 on the host: 3000 is a popular port (dev servers, other stacks)
+      - 127.0.0.1:3001:3000
+
+volumes:
+  prometheus:
+  grafana:

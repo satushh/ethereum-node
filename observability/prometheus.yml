@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 5s
+
+# The combined binary runs natively on the host; containers reach it via
+# host.docker.internal (mapped on Linux too via extra_hosts: host-gateway).
+scrape_configs:
+  - job_name: geth
+    metrics_path: /debug/metrics/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:6060"]
+
+  - job_name: beacon
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+
+  - job_name: validator
+    static_configs:
+      - targets: ["host.docker.internal:8081"]

@@ -1,0 +1,103 @@
+{
+  "title": "ethereum-node (combined geth + prysm)",
+  "uid": "ethereum-node",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "timezone": "browser",
+  "editable": true,
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Modules up",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "expr": "up", "legendFormat": "{{job}}", "refId": "A" } ],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } }, "overrides": [] },
+      "options": { "colorMode": "background", "textMode": "value_and_name", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Beacon head slot",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "expr": "beacon_head_slot", "refId": "A" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Execution head block",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "expr": "chain_head_block", "refId": "A" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Justified epoch",
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "expr": "beacon_current_justified_epoch", "refId": "A" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 5, "type": "stat", "title": "Finalized epoch",
+      "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "expr": "beacon_finalized_epoch", "refId": "A" } ],
+      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "yellow", "value": null }, { "color": "green", "value": 1 } ] } }, "overrides": [] }
+    },
+    {
+      "id": 6, "type": "stat", "title": "Reorgs",
+      "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "expr": "beacon_reorgs_total", "refId": "A" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Chain progress (CL slot / EL block)",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "beacon_head_slot", "legendFormat": "beacon head slot", "refId": "A" },
+        { "expr": "chain_head_block", "legendFormat": "execution head block", "refId": "B" },
+        { "expr": "beacon_finalized_epoch * 32", "legendFormat": "finalized slot", "refId": "C" }
+      ]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Peers (CL libp2p / EL devp2p)",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "p2p_peer_count{state=\"Connected\"}", "legendFormat": "beacon connected peers", "refId": "A" },
+        { "expr": "p2p_peers", "legendFormat": "geth peers", "refId": "B" }
+      ]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "CL block processing (state transition avg)",
+      "gridPos": { "x": 0, "y": 13, "w": 8, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "rate(state_transition_processing_milliseconds_sum[2m]) / rate(state_transition_processing_milliseconds_count[2m])", "legendFormat": "avg state transition", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] }
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Memory (RSS / geth heap used)",
+      "gridPos": { "x": 8, "y": 13, "w": 8, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "process_resident_memory_bytes{job=~\"beacon|validator\"}", "legendFormat": "{{job}} rss (whole process)", "refId": "A" },
+        { "expr": "system_memory_used{job=\"geth\"}", "legendFormat": "geth heap used", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] }
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Txpool pending / goroutines",
+      "gridPos": { "x": 16, "y": 13, "w": 8, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "txpool_pending", "legendFormat": "txpool pending", "refId": "A" },
+        { "expr": "system_cpu_goroutines", "legendFormat": "goroutines (whole process)", "refId": "B" }
+      ]
+    }
+  ]
+}
