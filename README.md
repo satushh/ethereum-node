@@ -527,6 +527,52 @@ fork currently needs mirroring — its vendored go-bip39 is functionally
 identical to upstream v1.1.0, so upstream is used directly), and re-diff
 `internal/prysmapp/` against upstream's main.go.
 
+## Version bump checklist
+
+What to check when a new prysm or geth release lands. (This list is what the
+future release-pairing CI, future-work #8, automates.)
+
+**Bumping prysm** (`go.mod` require → new tag):
+
+1. Read the new prysm go.mod and re-align three things: our go-ethereum
+   require to **exactly** the version it requires (the one-go-ethereum
+   invariant), our mirrored replace directives (new/changed ones must be
+   restated — Go ignores replaces in dependencies; re-diff the vendored
+   go-bip39 if it changed), and the `go` directive (toolchain
+   auto-downloads).
+2. Re-diff `internal/prysmapp/prysmapp.go` against upstream
+   `cmd/beacon-chain/main.go` — the one deliberate copy. Flag list
+   additions, `before`-hook changes, and the `node.New` signature are the
+   usual drift points. Disappears if upstream ever exports a beaconapp.
+3. `go mod tidy && go build` — compile errors here are the cheap alarm.
+
+**Bumping geth**: never independently — only to the version the new prysm
+requires. `internal/gethapp/` is compile-checked against geth's embedding
+API (config struct fields, `RegisterEthService`/`catalyst.Register`/
+`SetupMetrics` signatures), and the network presets track geth's `params`
+(networks get added and retired upstream).
+
+**Both, after any bump:**
+
+4. Devnet smoke: `scripts/devnet-up.sh` → block per slot, finality at ~13
+   min, clean SIGTERM. New forks need new epoch/version keys in
+   `devnet/config.yml` (fork versions must not collide with mainnet's
+   registry) and possibly a new `--fork` name for generate-genesis.
+5. Public-network smoke: `scripts/testnet-up.sh hoodi` → checkpoint sync,
+   peers, optimistic import.
+6. Dashboard queries: metric names drift (geth v1.17.4 already carries a
+   declared-but-dead `chain/inserts`); re-validate panel exprs against the
+   live exporters — the adaptation script's check (extract metric names from
+   every expr, verify against `/debug/metrics/prometheus` and `/metrics`)
+   is the model.
+7. Version strings: the README's "currently v1.17.4" mentions.
+
+What deliberately needs **no** attention: consensus flags in the config file
+(`consensus.settings` delegates to prysm's own loader), the engine API
+version (both ends are upstream code, so new `engine_*Vx` methods arrive in
+lockstep), and the devnet validator build (the scripts install the exact
+version go.mod pins).
+
 ## Measuring against v0
 
 v0 is the baseline every step above must beat on like-for-like runs. The
