@@ -8,6 +8,34 @@ removal made this possible: both clients now build with the ordinary Go
 toolchain, so a small integration module can compose them the way any Go
 program composes libraries.
 
+## Quick start
+
+Needs: git, Go (the right toolchain auto-downloads), and optionally Docker
+for the Grafana dashboard. First build downloads both clients' module graphs.
+
+```sh
+git clone https://github.com/satushh/ethereum-node.git
+cd ethereum-node
+go build -o bin/ethereum-node ./cmd/ethereum-node
+
+scripts/devnet-up.sh               # local devnet: combined node + validator client
+tail -f run/logs/node.log          # geth + prysm logs, one process, one stream
+
+# watch it produce and finalize blocks
+curl -s localhost:8545 -X POST -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+curl -s localhost:3500/eth/v1/beacon/states/head/finality_checkpoints
+
+scripts/observability-up.sh        # optional: grafana at http://127.0.0.1:3001
+```
+
+Blocks appear within ~1 minute; finalization after ~13 minutes (2 epochs).
+Stop: Ctrl-C (or kill) stops both halves cleanly;
+`scripts/observability-up.sh down` for the dashboard. Laptop note: system
+sleep freezes the devnet — keep the machine awake (`caffeinate -is`).
+Details in [Build](#build), [Run a local devnet](#run-a-local-devnet) and
+[Observability](#observability).
+
 ```
 +--------------------------------------------------------------+
 |            ethereum-node (one process, one binary)           |
