@@ -345,6 +345,57 @@ curl -s http://127.0.0.1:3500/eth/v1/beacon/headers/head
 Stop with a single Ctrl-C / SIGTERM: Prysm's signal handler shuts the beacon
 module down, after which the supervisor closes the geth stack.
 
+### The same devnet, flag by flag
+
+`scripts/devnet-up.sh` hides the moving parts; here they are spelled out.
+Copy-paste from the repo root (needs nothing but Go):
+
+```sh
+go build -o bin/ethereum-node ./cmd/ethereum-node
+GOBIN=$PWD/bin go install github.com/OffchainLabs/prysm/v7/cmd/validator@$(go list -m -f '{{.Version}}' github.com/OffchainLabs/prysm/v7)
+
+./bin/ethereum-node devnet-wallet --wallet-dir=run/wallet --num-validators=64
+./bin/ethereum-node testnet generate-genesis --fork=fulu --num-validators=64 \
+    --genesis-time-delay=45 --chain-config-file=devnet/config.yml \
+    --geth-genesis-json-out=run/genesis.json --output-ssz=run/genesis.ssz
+
+./bin/ethereum-node run \
+    --datadir=run/data \
+    --el-genesis=run/genesis.json \
+    --cl-genesis-state=run/genesis.ssz \
+    --cl-chain-config=devnet/config.yml \
+    --http.port=8545 \
+    --verbosity=info \
+    --metrics \
+    --fee-recipient=0x878705ba3f8bc32fcf7f4caa1a35e72af65cf766 \
+    --beacon-flag no-discovery \
+    --beacon-flag supernode \
+    --beacon-flag min-sync-peers=0 \
+    --beacon-flag minimum-peers-per-subnet=0 \
+    --beacon-flag contract-deployment-block=0
+```
+
+and in a second terminal, the validator client (signs with the 64 keys the
+wallet step created):
+
+```sh
+./bin/validator --accept-terms-of-use --datadir=run/data/validator \
+    --beacon-rpc-provider=127.0.0.1:4000 --chain-config-file=devnet/config.yml \
+    --wallet-dir=run/wallet --wallet-password-file=run/wallet/password.txt
+```
+
+Each flag above represents one kind of knob:
+
+- `--datadir` — supervisor topology: one root, `execution/` + `beacon/` inside
+- `--el-genesis` / `--cl-genesis-state` / `--cl-chain-config` — the devnet
+  genesis fixtures the two halves must agree on
+- `--http.port` — a curated geth option (the supervisor-owned shortlist)
+- `--verbosity`, `--metrics`, `--fee-recipient` — shared knobs the supervisor
+  fans out to both modules
+- `--beacon-flag <anything>` — inline passthrough to the full upstream Prysm
+  flag surface; the file-based equivalent is `consensus.settings`, and the
+  geth equivalent is `execution.settings` (see the config-file section)
+
 ## Run on a public testnet (Hoodi)
 
 ```sh
