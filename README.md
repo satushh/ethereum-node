@@ -412,8 +412,10 @@ What to expect on Hoodi:
 
 - Beacon at the network head within minutes (checkpoint sync, ~13 peers on
   first try); blocks import optimistically while the EL catches up.
-- Geth snap sync is the long pole: hours, and the bulk of the disk. Budget
-  ~150 GB for comfort; expect meaningfully less used in practice.
+- Geth snap sync is the long pole. Measured 2026-07-29 on an M-series laptop
+  with home broadband: **1h20m to fully validating, 105 GB total** — 104 GB
+  execution (state alone 73 GiB: 45M accounts, 279M storage slots) and
+  0.7 GB beacon with pruning on. Budget ~150 GB for growth headroom.
 - Keep disk small: the defaults already avoid the expensive choices — no
   `--supernode` (custodies only a fraction of PeerDAS columns), no backfill,
   blob/column data self-prunes after ~18 days. Add
