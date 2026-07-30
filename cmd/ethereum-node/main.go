@@ -93,6 +93,11 @@ var (
 		Usage: "Expose prometheus metrics on 127.0.0.1 (geth :6060/debug/metrics/prometheus, beacon :8080/metrics)",
 		Value: true,
 	}
+	isolationFlag = &cli.StringFlag{
+		Name:  "isolation",
+		Usage: "single: both modules in this process; process: supervised child processes of this same binary (crash isolation; A/B benchmarking)",
+		Value: "single",
+	}
 	beaconFlagPassthrough = &cli.StringSliceFlag{
 		Name:  "beacon-flag",
 		Usage: "Extra flag for the embedded beacon node, without leading dashes (repeatable), e.g. --beacon-flag supernode",
@@ -126,6 +131,7 @@ func main() {
 		Commands: append([]*cli.Command{
 			runCommand(),
 			beaconCommand(),
+			elChildCommand(),
 			devnetWalletCommand(),
 			versionCommand(),
 		}, testnetcmds.Commands...),
@@ -144,7 +150,7 @@ func runCommand() *cli.Command {
 			configFlag, datadirFlag, networkFlag, checkpointURLFlag,
 			elGenesisFlag, clGenesisStateFlag, clChainConfigFlag,
 			httpPortFlag, authPortFlag, p2pListenFlag, feeRecipientFlag,
-			verbosityFlag, metricsFlag, beaconFlagPassthrough, elSettingFlag,
+			verbosityFlag, metricsFlag, isolationFlag, beaconFlagPassthrough, elSettingFlag,
 		},
 		Action: runNode,
 	}
@@ -179,34 +185,27 @@ func runNode(c *cli.Context) error {
 	if c.Bool(metricsFlag.Name) {
 		gethMetricsPort = 6060
 	}
-	gethNode, err := gethapp.Start(gethapp.Config{
-		DataDir:     filepath.Join(datadir, "execution"),
-		Network:     network,
-		GenesisPath: c.String(elGenesisFlag.Name),
-		HTTPHost:    "127.0.0.1",
-		HTTPPort:    c.Int(httpPortFlag.Name),
-		AuthPort:    c.Int(authPortFlag.Name),
+	gethCfg := gethapp.Config{
+		DataDir:      filepath.Join(datadir, "execution"),
+		Network:      network,
+		GenesisPath:  c.String(elGenesisFlag.Name),
+		HTTPHost:     "127.0.0.1",
+		HTTPPort:     c.Int(httpPortFlag.Name),
+		AuthPort:     c.Int(authPortFlag.Name),
 		P2PListen:    p2pListen,
 		Verbosity:    c.String(verbosityFlag.Name),
 		MetricsPort:  gethMetricsPort,
 		SettingsTOML: []string{extras.GethSettings, strings.Join(c.StringSlice(elSettingFlag.Name), "\n")},
-	})
-	if err != nil {
-		return fmt.Errorf("execution module failed to start: %w", err)
 	}
-	defer func() {
-		fmt.Println("ethereum-node: stopping execution module")
-		if err := gethNode.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "ethereum-node: execution module shutdown error: %v\n", err)
-		}
-	}()
-	fmt.Printf("  engine API: %s (in-datadir IPC, no JWT needed)\n", gethNode.IPCEndpoint())
+	// The engine endpoint is known before geth starts: the IPC socket lives
+	// at a fixed path inside the execution datadir.
+	ipcPath := filepath.Join(gethCfg.DataDir, "geth.ipc")
 
 	beaconArgs := []string{
 		"beacon-chain",
 		"--" + prysmcmd.AcceptTosFlag.Name,
 		fmt.Sprintf("--%s=%s", prysmcmd.DataDirFlag.Name, filepath.Join(datadir, "beacon")),
-		fmt.Sprintf("--%s=%s", beaconflags.ExecutionEngineEndpoint.Name, gethNode.IPCEndpoint()),
+		fmt.Sprintf("--%s=%s", beaconflags.ExecutionEngineEndpoint.Name, ipcPath),
 		fmt.Sprintf("--%s=%s", beaconflags.SuggestedFeeRecipient.Name, c.String(feeRecipientFlag.Name)),
 		fmt.Sprintf("--%s=%s", prysmcmd.VerbosityFlag.Name, c.String(verbosityFlag.Name)),
 	}
@@ -239,6 +238,24 @@ func runNode(c *cli.Context) error {
 	for _, f := range c.StringSlice(beaconFlagPassthrough.Name) {
 		beaconArgs = append(beaconArgs, "--"+f)
 	}
+
+	// Same code, same config, different process boundary: the supervisor
+	// re-executes this binary as one child per module.
+	if c.String(isolationFlag.Name) == "process" {
+		return runProcessIsolated(gethCfg, beaconArgs)
+	}
+
+	gethNode, err := gethapp.Start(gethCfg)
+	if err != nil {
+		return fmt.Errorf("execution module failed to start: %w", err)
+	}
+	defer func() {
+		fmt.Println("ethereum-node: stopping execution module")
+		if err := gethNode.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "ethereum-node: execution module shutdown error: %v\n", err)
+		}
+	}()
+	fmt.Printf("  engine API: %s (in-datadir IPC, no JWT needed)\n", ipcPath)
 
 	// Blocks until shutdown; Prysm handles SIGINT/SIGTERM itself, then the
 	// deferred Close above tears down the execution module.
