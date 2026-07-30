@@ -15,17 +15,24 @@ FUNDED=0x123463a4B065722E99115D6c222f267d9cABb524
 mkdir -p "$OUT" run/logs
 rm -rf run/data run/genesis.json run/genesis.ssz
 
+# Two-pass genesis: the spammer account must be funded BEFORE the CL state
+# is computed, because the CL genesis state embeds the EL genesis hash —
+# mutating genesis.json afterwards desyncs the two and no block can build.
 ./bin/ethereum-node testnet generate-genesis --fork=fulu --num-validators=64 \
-    --genesis-time-delay=30 --chain-config-file=bench/config-6s.yml \
-    --geth-genesis-json-out=run/genesis.json --output-ssz=run/genesis.ssz >/dev/null 2>&1
-
-# prefund the spammer account
+    --chain-config-file=bench/config-6s.yml \
+    --geth-genesis-json-out=run/genesis-template.json --output-ssz=run/genesis-discard.ssz >/dev/null 2>&1
 python3 - <<EOF
 import json
-g = json.load(open("run/genesis.json"))
-g["alloc"]["$FUNDED"] = {"balance": "0xd3c21bcecceda1000000"}
-json.dump(g, open("run/genesis.json", "w"), indent=1)
+g = json.load(open("run/genesis-template.json"))
+g.setdefault("alloc", {})["$FUNDED"] = {"balance": "0xd3c21bcecceda1000000"}
+g["baseFeePerGas"] = "0x3b9aca00"
+json.dump(g, open("run/genesis-template.json", "w"), indent=1)
 EOF
+./bin/ethereum-node testnet generate-genesis --fork=fulu --num-validators=64 \
+    --genesis-time-delay=30 --chain-config-file=bench/config-6s.yml \
+    --geth-genesis-json-in=run/genesis-template.json \
+    --geth-genesis-json-out=run/genesis.json --output-ssz=run/genesis.ssz >/dev/null 2>&1
+rm -f run/genesis-discard.ssz run/genesis-template.json
 
 ./bin/ethereum-node run \
     --datadir=run/data \
