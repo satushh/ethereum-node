@@ -7,3 +7,6 @@ go.work.sum
 
 # devnet state: chain databases, generated genesis, logs, validator wallet
 run/
+
+# benchmark run artifacts
+bench/out/
