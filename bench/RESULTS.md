@@ -30,11 +30,19 @@ processes (validator and spammer excluded).
   anyway. This measurement isolates the *process boundary*, not the
   transport — the transport ladder (in-proc, typed calls) is future work
   and would need this harness re-run per rung.
-- **The memory win is real and structural: ~95 MiB (~25%) lower RSS** for
-  one process instead of three. That is one Go runtime (heap, GC metadata,
-  scheduler, code pages) instead of three — the "collapsed duplicated
-  runtime overhead" claim, now with a number. Expect the absolute gap to
-  matter more on small machines (Raspberry-class stakers) than on servers.
+- **The memory win is real but the honest baseline is 2 processes, not 3.**
+  Nobody runs a supervisor today — operators start geth and a beacon node
+  directly. Decomposing process mode per-process (separate sampling run):
+  supervisor ≈ 34–44 MiB (it is a full copy of the fat binary whose package
+  inits all run), children ≈ 150–160 MiB each. Subtracting the supervisor
+  from the 378 MiB total: **~338 MiB for a two-process split vs 283 MiB
+  combined → ~55 MiB (~16%) saved by one Go runtime instead of two.** One
+  further confound remains: these children are the fat binary (each also
+  runs the *other* client's package inits), so a true standalone-geth +
+  standalone-prysm pair would be somewhat lighter still — pinning that down
+  needs the README's configuration A (real standalone binaries), not this
+  harness. Expect the absolute gap to matter most on Raspberry-class
+  stakers.
 - **Tail latencies (p99) lean single-process** — plausible (fewer
   cross-process wakeups on the payload handoff path) but n≈2 samples at
   p99 per leg; treat as suggestive until repeated.
