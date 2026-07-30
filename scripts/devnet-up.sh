@@ -16,7 +16,10 @@ if [ "${1:-}" = "down" ]; then
     pkill -TERM -f "ethereum-node run" 2>/dev/null || true
     pkill -TERM -f "bin/validator" 2>/dev/null || true
     pkill -TERM -f "bin/devnet-spam" 2>/dev/null || true
-    echo ">> devnet stopped (dashboards stay up; scripts/observability-up.sh down stops them)"
+    if docker info >/dev/null 2>&1; then
+        "$(dirname "$0")/observability-up.sh" down
+    fi
+    echo ">> devnet stopped"
     exit 0
 fi
 

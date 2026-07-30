@@ -41,8 +41,8 @@ scripts/testnet-up.sh hoodi        # equivalently:
 Blocks appear within ~1 minute (with transactions in them — the script runs
 a small spammer from genesis-funded dev accounts; `NO_SPAM=1` disables);
 finalization after ~13 minutes (2 epochs).
-Stop: `scripts/devnet-up.sh down` (and `scripts/observability-up.sh down`
-for the dashboards). Laptop note: system sleep freezes the devnet — keep the
+Stop: `scripts/devnet-up.sh down` — node, validator, spammer and the
+dashboard containers, all of it. Laptop note: system sleep freezes the devnet — keep the
 machine awake (`caffeinate -is`).
 Details in [Build](#build), [Run a local devnet](#run-a-local-devnet) and
 [Observability](#observability).
