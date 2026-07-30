@@ -83,6 +83,9 @@ func decodeSettings(chunks []string) (*gethTomlConfig, error) {
 		Node:    node.DefaultConfig,
 		Metrics: metrics.DefaultConfig,
 	}
+	// Our default HTTP module set (node.DefaultConfig ships only net+web3);
+	// seeded before decoding so a TOML [Node] HTTPModules can still override.
+	base.Node.HTTPModules = []string{"eth", "net", "web3", "txpool"}
 	for _, chunk := range chunks {
 		if chunk == "" {
 			continue
@@ -134,9 +137,6 @@ func Start(cfg Config) (*Node, error) {
 	nodeCfg.IPCPath = "geth.ipc"
 	nodeCfg.HTTPHost = cfg.HTTPHost
 	nodeCfg.HTTPPort = cfg.HTTPPort
-	if len(nodeCfg.HTTPModules) == 0 {
-		nodeCfg.HTTPModules = []string{"eth", "net", "web3", "txpool"}
-	}
 	nodeCfg.AuthAddr = "127.0.0.1"
 	nodeCfg.AuthPort = cfg.AuthPort
 	nodeCfg.P2P.ListenAddr = cfg.P2PListen
