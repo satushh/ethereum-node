@@ -3,7 +3,7 @@
 #
 #   bin/ethereum-node devnet-wallet --wallet-dir=run/wallet --num-validators=64
 #   bin/ethereum-node testnet generate-genesis --fork=fulu --num-validators=64 \
-#     --genesis-time-delay=45 --chain-config-file=devnet/config.yml \
+#     --genesis-time-delay=45 --chain-config-file=devnet/chain-config.yml \
 #     --geth-genesis-json-out=run/genesis.json --output-ssz=run/genesis.ssz
 #
 # then:  ethereum-node run --config configs/devnet.yaml
@@ -15,7 +15,7 @@ execution:
 
 consensus:
   genesis-state: ./run/genesis.ssz
-  chain-config: ./devnet/config.yml
+  chain-config: ./devnet/chain-config.yml
   settings:
     no-discovery: true
     supernode: true
