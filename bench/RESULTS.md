@@ -43,7 +43,13 @@ processes (validator and spammer excluded).
 
 Single run per mode (methodology calls for 3×); devnet scale (no real
 network, gossip, or state size); 6s slots; both legs share the machine
-with the OS. Reproduce with:
+with the OS. Also: the RSS figure sums per-process RSS, and the OS counts
+shared read-only pages (all three processes run the same executable) in
+each process — the two children fault in mostly disjoint halves of the
+binary, but some double-counting remains, so the true physical saving is
+somewhat below the 95 MiB headline. Direction and mechanism (one Go
+runtime — GC bookkeeping, allocator cushion, scheduler — instead of
+three) are unaffected. Reproduce with:
 
 ```sh
 bench/run-one.sh single 200 50 && bench/run-one.sh process 200 50
