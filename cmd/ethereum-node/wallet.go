@@ -30,8 +30,10 @@ func devnetWalletCommand() *cli.Command {
 			if err != nil {
 				return err
 			}
-			if err := os.RemoveAll(walletDir); err != nil {
-				return err
+			// Refuse to clobber arbitrary directories (--wallet-dir=. must
+			// not erase a checkout); the caller deletes old wallets.
+			if entries, err := os.ReadDir(walletDir); err == nil && len(entries) > 0 {
+				return fmt.Errorf("%s already exists and is not empty; remove it first to recreate the wallet", walletDir)
 			}
 
 			privs, pubs, err := interop.DeterministicallyGenerateKeys(c.Uint64(keyOffsetFlag.Name), c.Uint64(numValidatorsFlag.Name))

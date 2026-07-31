@@ -240,6 +240,10 @@ func loadGenesis(path string) (*core.Genesis, error) {
 	if err := json.NewDecoder(f).Decode(genesis); err != nil {
 		return nil, fmt.Errorf("decode execution genesis %s: %w", path, err)
 	}
+	// Guard before genesis.Config.ChainID is dereferenced downstream.
+	if genesis.Config == nil || genesis.Config.ChainID == nil {
+		return nil, fmt.Errorf("execution genesis %s has no chain config / chainId", path)
+	}
 	return genesis, nil
 }
 

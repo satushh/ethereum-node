@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	prysmcmd "github.com/OffchainLabs/prysm/v7/cmd"
@@ -28,6 +29,20 @@ import (
 )
 
 const bundleVersion = "v0.1.0-dev"
+
+// prysmModuleVersion reports the prysm version actually linked in, from the
+// binary's embedded build info. (Prysm's own runtime/version prints
+// "Unknown/Local build" under plain `go build`, which expects linker vars.)
+func prysmModuleVersion() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, dep := range bi.Deps {
+			if dep.Path == "github.com/OffchainLabs/prysm/v7" {
+				return dep.Version
+			}
+		}
+	}
+	return prysmversion.Version()
+}
 
 // Prefunded miner account from Prysm's interop EL genesis
 // (prysm/runtime/interop/genesis.go), used as the default fee recipient.
@@ -173,7 +188,7 @@ func runNode(c *cli.Context) error {
 
 	fmt.Printf("ethereum-node %s starting\n", bundleVersion)
 	fmt.Printf("  execution: geth v%d.%d.%d-%s -> %s\n", gethversion.Major, gethversion.Minor, gethversion.Patch, gethversion.Meta, filepath.Join(datadir, "execution"))
-	fmt.Printf("  consensus: prysm %s -> %s\n", prysmversion.Version(), filepath.Join(datadir, "beacon"))
+	fmt.Printf("  consensus: prysm %s -> %s\n", prysmModuleVersion(), filepath.Join(datadir, "beacon"))
 
 	gethMetricsPort := 0
 	if c.Bool(metricsFlag.Name) {
@@ -263,7 +278,7 @@ func versionCommand() *cli.Command {
 		Action: func(*cli.Context) error {
 			fmt.Printf("ethereum-node %s\n", bundleVersion)
 			fmt.Printf("  geth:    v%d.%d.%d-%s\n", gethversion.Major, gethversion.Minor, gethversion.Patch, gethversion.Meta)
-			fmt.Printf("  prysm:   %s\n", prysmversion.Version())
+			fmt.Printf("  prysm:   %s\n", prysmModuleVersion())
 			fmt.Printf("  runtime: single process, engine API over private IPC\n")
 			return nil
 		},

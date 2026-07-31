@@ -9,8 +9,9 @@ small integration module composes them like any two Go libraries.
 
 ## Quick start
 
-Needs git, Go (the right toolchain auto-downloads), and optionally Docker for
-Grafana. First build downloads both clients' module graphs.
+Needs git, Go (the right toolchain auto-downloads), python3 (devnet genesis
+step), and optionally Docker for Grafana. First build downloads both clients'
+module graphs.
 
 ```sh
 git clone https://github.com/satushh/ethereum-node.git
@@ -83,10 +84,10 @@ structs and calls `node.New` → `utils.RegisterEthService` →
 `catalyst.Register` → `stack.Start()` — geth as a library. Prysm's
 constructor reads options through a `cli.Context` across many packages, so it
 can't be struct-wired: `internal/prysmapp/` is upstream's
-`cmd/beacon-chain/main.go` copied verbatim into an importable package (only
-deviations: `Run(ctx, argv)` entrypoint, errors returned instead of
-`log.Fatal`), and the supervisor synthesizes its argv — prysm as its own CLI,
-in-process. Combining is then just call order:
+`cmd/beacon-chain/main.go` copied near-verbatim into an importable package
+(deviations: `Run(ctx, argv)` entrypoint, errors returned instead of
+`log.Fatal`, a `KnownFlags` helper for config validation, log prefix), and
+the supervisor synthesizes its argv — prysm as its own CLI, in-process. Combining is then just call order:
 
 ```
 1. start geth            → it creates <datadir>/execution/geth.ipc
@@ -176,7 +177,7 @@ matters next:
          (prysm/beacon-chain/execution/            by reference, validated
          engine_client.go:53) directly on          against the JSON path by
          catalyst.ConsensusAPI                     running both in tests
-         (go-ethereum/eth/catalyst/api.go:768)
+         (go-ethereum/eth/catalyst/api.go:90)
 ```
 
 | Redundancy | Two processes | This binary today | Possible in one process |
@@ -231,7 +232,7 @@ out, with each flag representing one kind of knob:
 
 ```sh
 go build -o bin/ethereum-node ./cmd/ethereum-node
-GOBIN=$PWD/bin go install github.com/OffchainLabs/prysm/v7/cmd/validator@$(go list -m -f '{{.Version}}' github.com/OffchainLabs/prysm/v7)
+go build -o bin/validator github.com/OffchainLabs/prysm/v7/cmd/validator
 
 ./bin/ethereum-node devnet-wallet --wallet-dir=run/wallet --num-validators=64
 ./bin/ethereum-node testnet generate-genesis --fork=fulu --num-validators=64 \
@@ -322,14 +323,22 @@ consensus:
     min-sync-peers: 0          # own --config-file loader
 ```
 
-Precedence rule: **supervisor-owned topology always wins** (datadir, engine
-socket, ports, network posture, genesis); everything else is `settings`,
-delegated to each client's own loader — no option list is transcribed by
-hand, so coverage can't rot across releases. Typos fail loudly on both sides
-(consensus keys checked against the embedded flag set; execution fields get
-geth's own "field not defined" error). Full file/inline parity:
-supervisor keys ↔ CLI flags, `consensus.settings` ↔ `--beacon-flag`,
-`execution.settings` ↔ `--el-setting` (inline overrides file).
+Precedence rule: **supervisor-owned topology wins** — datadir, the engine
+socket, HTTP/authrpc host+port, p2p listen and network posture, genesis and
+network id are applied *after* the settings decode; everything else is
+`settings`, delegated to each client's own loader — no option list is
+transcribed by hand, so coverage can't rot across releases. Two honest
+limits: `execution.settings` covers the `[Eth]`/`[Node]`/`[Metrics]`
+sections of `geth dumpconfig` (no Ethstats; a few fields only matter with
+services this build doesn't register), and settings *can* still tune knobs
+adjacent to topology (e.g. discovery internals, metrics details) when you
+ask them to. Typos fail loudly on both sides (consensus keys checked against
+the embedded flag set; execution fields get geth's own "field not defined"
+error). Full file/inline parity: supervisor keys ↔ CLI flags,
+`consensus.settings` ↔ `--beacon-flag`, `execution.settings` ↔
+`--el-setting` (inline overrides file; `--beacon-flag` args land last on the
+synthesized argv, so they can even override supervisor-set beacon args — an
+escape hatch, mind your feet).
 
 ## Observability
 
@@ -348,8 +357,8 @@ Three auto-provisioned dashboards, every panel title prefixed `EL:`/`CL:`:
 
 - **ethereum-node** — both halves on one screen: CL slot/justified/finalized
   vs EL head block, peers, state-transition timing, memory, txpool, DB size,
-  devp2p bandwidth, RPC rate (on this node, literally the engine-over-IPC
-  heartbeat).
+  devp2p bandwidth, RPC rate (dominated by the engine-over-IPC calls on an
+  otherwise idle node; the counter covers all RPC transports).
 - **Beacon node (detailed)** — adapted from nalepae/infra (79 panels, minus
   those needing log/trace datasources this stack doesn't run).
 - **Geth node (detailed)** — adapted from

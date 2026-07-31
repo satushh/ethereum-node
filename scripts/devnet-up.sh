@@ -13,6 +13,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ "${1:-}" = "down" ]; then
+    # the delayed spam launcher (sleep && devnet-spam) doesn't match the
+    # devnet-spam pattern while still sleeping — kill it by recorded pid
+    if [ -f run/spam-launcher.pid ]; then
+        kill "$(cat run/spam-launcher.pid)" 2>/dev/null || true
+        rm -f run/spam-launcher.pid
+    fi
     pkill -TERM -f "ethereum-node run" 2>/dev/null || true
     pkill -TERM -f "bin/validator" 2>/dev/null || true
     pkill -TERM -f "bin/devnet-spam" 2>/dev/null || true
@@ -37,14 +43,11 @@ if [ ! -x bin/ethereum-node ]; then
     go build -o bin/ethereum-node ./cmd/ethereum-node
 fi
 if [ ! -x bin/validator ]; then
-    echo ">> building prysm validator"
-    if [ -d ../prysm ]; then
-        (cd ../prysm && go build -o "$PWD/../ethereum-node/bin/validator" ./cmd/validator)
-    else
-        # no local clone: install the exact version go.mod pins
-        PRYSM_VERSION=$(go list -m -f '{{.Version}}' github.com/OffchainLabs/prysm/v7)
-        GOBIN="$PWD/bin" go install "github.com/OffchainLabs/prysm/v7/cmd/validator@${PRYSM_VERSION}"
-    fi
+    echo ">> building prysm validator (exact version go.mod pins)"
+    # Built from this module's context: uses our pinned prysm + mirrored
+    # replaces. (`go install pkg@version` cannot: prysm's go.mod contains
+    # replace directives, which that mode rejects.)
+    go build -o bin/validator github.com/OffchainLabs/prysm/v7/cmd/validator
 fi
 if [ ! -d run/wallet ]; then
     echo ">> creating devnet validator wallet"
@@ -104,6 +107,7 @@ if [ "${NO_SPAM:-0}" != "1" ]; then
     echo ">> starting tx spammer (${SPAM_RATE} tx/s from ${SPAM_ACCOUNTS} accounts; NO_SPAM=1 disables)"
     (sleep $((DELAY + 10)) && ./bin/devnet-spam --rate="${SPAM_RATE}" --num-accounts="${SPAM_ACCOUNTS}") \
         > run/logs/spam.log 2>&1 &
+    echo $! > run/spam-launcher.pid
     echo "   pid $! (logs: run/logs/spam.log)"
 fi
 
