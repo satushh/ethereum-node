@@ -9,6 +9,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,9 @@ func prysmModuleVersion() string {
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		for _, dep := range bi.Deps {
 			if dep.Path == "github.com/OffchainLabs/prysm/v7" {
+				if dep.Replace != nil { // go.work overlay / replace: report the truth
+					return dep.Replace.Version + " (replaced: " + dep.Replace.Path + ")"
+				}
 				return dep.Version
 			}
 		}
@@ -47,6 +51,13 @@ func prysmModuleVersion() string {
 // Prefunded miner account from Prysm's interop EL genesis
 // (prysm/runtime/interop/genesis.go), used as the default fee recipient.
 const devnetFeeRecipient = "0x878705ba3f8bc32fcf7f4caa1a35e72af65cf766"
+
+// rawStrings is a repeatable flag value that accumulates verbatim (no comma
+// splitting, unlike cli.StringSliceFlag).
+type rawStrings []string
+
+func (r *rawStrings) Set(v string) error { *r = append(*r, v); return nil }
+func (r *rawStrings) String() string     { return strings.Join(*r, " ") }
 
 var (
 	datadirFlag = &cli.StringFlag{
@@ -108,13 +119,19 @@ var (
 		Usage: "Expose prometheus metrics on 127.0.0.1 (geth :6060/debug/metrics/prometheus, beacon :8080/metrics)",
 		Value: true,
 	}
-	beaconFlagPassthrough = &cli.StringSliceFlag{
+	// GenericFlag + rawStrings: unlike StringSliceFlag, values are NOT split
+	// on commas — '--el-setting HTTPModules = ["eth", "net"]' must survive.
+	beaconFlagValues      = rawStrings{}
+	beaconFlagPassthrough = &cli.GenericFlag{
 		Name:  "beacon-flag",
 		Usage: "Extra flag for the embedded beacon node, without leading dashes (repeatable), e.g. --beacon-flag supernode",
+		Value: &beaconFlagValues,
 	}
-	elSettingFlag = &cli.StringSliceFlag{
+	elSettingValues = rawStrings{}
+	elSettingFlag   = &cli.GenericFlag{
 		Name:  "el-setting",
 		Usage: "Inline geth TOML for the embedded execution node (repeatable, lines join in order), e.g. --el-setting '[Eth]' --el-setting 'DatabaseCache = 4096'. Overrides execution.settings from --config",
+		Value: &elSettingValues,
 	}
 	walletDirFlag = &cli.StringFlag{
 		Name:  "wallet-dir",
@@ -165,7 +182,7 @@ func runCommand() *cli.Command {
 	}
 }
 
-func runNode(c *cli.Context) error {
+func runNode(c *cli.Context) (retErr error) {
 	extras := &fileExtras{}
 	if path := c.String(configFlag.Name); path != "" {
 		var err error
@@ -195,16 +212,16 @@ func runNode(c *cli.Context) error {
 		gethMetricsPort = 6060
 	}
 	gethNode, err := gethapp.Start(gethapp.Config{
-		DataDir:     filepath.Join(datadir, "execution"),
-		Network:     network,
-		GenesisPath: c.String(elGenesisFlag.Name),
-		HTTPHost:    "127.0.0.1",
-		HTTPPort:    c.Int(httpPortFlag.Name),
-		AuthPort:    c.Int(authPortFlag.Name),
+		DataDir:      filepath.Join(datadir, "execution"),
+		Network:      network,
+		GenesisPath:  c.String(elGenesisFlag.Name),
+		HTTPHost:     "127.0.0.1",
+		HTTPPort:     c.Int(httpPortFlag.Name),
+		AuthPort:     c.Int(authPortFlag.Name),
 		P2PListen:    p2pListen,
 		Verbosity:    c.String(verbosityFlag.Name),
 		MetricsPort:  gethMetricsPort,
-		SettingsTOML: []string{extras.GethSettings, strings.Join(c.StringSlice(elSettingFlag.Name), "\n")},
+		SettingsTOML: []string{extras.GethSettings, strings.Join(elSettingValues, "\n")},
 	})
 	if err != nil {
 		return fmt.Errorf("execution module failed to start: %w", err)
@@ -212,7 +229,8 @@ func runNode(c *cli.Context) error {
 	defer func() {
 		fmt.Println("ethereum-node: stopping execution module")
 		if err := gethNode.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "ethereum-node: execution module shutdown error: %v\n", err)
+			// surface in the exit status, not just on stderr
+			retErr = errors.Join(retErr, fmt.Errorf("execution module shutdown: %w", err))
 		}
 	}()
 	fmt.Printf("  engine API: %s (in-datadir IPC, no JWT needed)\n", gethNode.IPCEndpoint())
@@ -251,7 +269,7 @@ func runNode(c *cli.Context) error {
 		beaconArgs = append(beaconArgs, fmt.Sprintf("--%s=%s", beacongenesis.StatePath.Name, v))
 	}
 	beaconArgs = append(beaconArgs, extras.BeaconArgs...)
-	for _, f := range c.StringSlice(beaconFlagPassthrough.Name) {
+	for _, f := range beaconFlagValues {
 		beaconArgs = append(beaconArgs, "--"+f)
 	}
 

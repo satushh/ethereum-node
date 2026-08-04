@@ -83,9 +83,11 @@ func decodeSettings(chunks []string) (*gethTomlConfig, error) {
 		Node:    node.DefaultConfig,
 		Metrics: metrics.DefaultConfig,
 	}
-	// Our default HTTP module set (node.DefaultConfig ships only net+web3);
-	// seeded before decoding so a TOML [Node] HTTPModules can still override.
-	base.Node.HTTPModules = []string{"eth", "net", "web3", "txpool"}
+	// Match cmd/geth's defaultNodeConfig: stock module lists plus "eth"
+	// (node.DefaultConfig ships only net+web3). Seeded before decoding so a
+	// TOML [Node] HTTPModules/WSModules can still override.
+	base.Node.HTTPModules = append(base.Node.HTTPModules, "eth")
+	base.Node.WSModules = append(base.Node.WSModules, "eth")
 	for _, chunk := range chunks {
 		if chunk == "" {
 			continue
@@ -121,12 +123,12 @@ func Start(cfg Config) (*Node, error) {
 	// Must run before the eth service is constructed so its meters register
 	// against an enabled metrics registry (mirrors cmd/geth ordering).
 	metricsCfg := base.Metrics
-	if cfg.MetricsPort > 0 {
-		metricsCfg.Enabled = true
+	// The supervisor's --metrics switch is authoritative in both directions:
+	// a [Metrics] Enabled=true in settings TOML cannot re-enable it.
+	metricsCfg.Enabled = cfg.MetricsPort > 0
+	if metricsCfg.Enabled {
 		metricsCfg.HTTP = "127.0.0.1"
 		metricsCfg.Port = cfg.MetricsPort
-	}
-	if metricsCfg.Enabled {
 		utils.SetupMetrics(&metricsCfg)
 	}
 
@@ -141,8 +143,14 @@ func Start(cfg Config) (*Node, error) {
 	nodeCfg.AuthPort = cfg.AuthPort
 	nodeCfg.P2P.ListenAddr = cfg.P2PListen
 	if cfg.Network != "" {
-		// Public network: find peers via bootnodes + discovery.
+		// Public network: find peers via bootnodes + discovery (v4 and v5,
+		// mirroring cmd/geth defaults).
 		nodeCfg.P2P.BootstrapNodes = bootnodes
+		v5nodes, err := parseEnodes(params.V5Bootnodes)
+		if err != nil {
+			return nil, err
+		}
+		nodeCfg.P2P.BootstrapNodesV5 = v5nodes
 		nodeCfg.P2P.NoDiscovery = false
 		nodeCfg.P2P.NoDial = false
 		nodeCfg.P2P.NAT = nat.Any()
@@ -175,7 +183,7 @@ func Start(cfg Config) (*Node, error) {
 		return nil, fmt.Errorf("register engine API: %w", err)
 	}
 	if err := stack.Start(); err != nil {
-		stack.Close()
+		// node.Start closes the stack itself on failure; no second Close.
 		return nil, fmt.Errorf("start geth stack: %w", err)
 	}
 	return &Node{stack: stack}, nil
@@ -216,15 +224,23 @@ func networkPreset(cfg Config) (*core.Genesis, []*enode.Node, error) {
 	default:
 		return nil, nil, fmt.Errorf("unknown network %q (supported: hoodi, sepolia, mainnet)", cfg.Network)
 	}
-	bootnodes := make([]*enode.Node, 0, len(urls))
+	bootnodes, err := parseEnodes(urls)
+	if err != nil {
+		return nil, nil, err
+	}
+	return genesis, bootnodes, nil
+}
+
+func parseEnodes(urls []string) ([]*enode.Node, error) {
+	nodes := make([]*enode.Node, 0, len(urls))
 	for _, url := range urls {
 		n, err := enode.Parse(enode.ValidSchemes, url)
 		if err != nil {
-			return nil, nil, fmt.Errorf("parse bootnode %q: %w", url, err)
+			return nil, fmt.Errorf("parse bootnode %q: %w", url, err)
 		}
-		bootnodes = append(bootnodes, n)
+		nodes = append(nodes, n)
 	}
-	return genesis, bootnodes, nil
+	return nodes, nil
 }
 
 func loadGenesis(path string) (*core.Genesis, error) {

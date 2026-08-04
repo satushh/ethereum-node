@@ -22,7 +22,11 @@ if [ "${1:-}" = "down" ]; then
     pkill -TERM -f "ethereum-node run" 2>/dev/null || true
     pkill -TERM -f "bin/validator" 2>/dev/null || true
     pkill -TERM -f "bin/devnet-spam" 2>/dev/null || true
-    if docker info >/dev/null 2>&1; then
+    for _i in 1 2 3 4 5 6 7 8 9 10; do
+        pgrep -f "ethereum-node run|bin/validator|bin/devnet-spam" >/dev/null 2>&1 || break
+        sleep 1
+    done
+    if [ "${NO_OBSERVABILITY:-0}" != "1" ] && docker info >/dev/null 2>&1; then
         "$(dirname "$0")/observability-up.sh" down
     fi
     echo ">> devnet stopped"
@@ -34,29 +38,29 @@ FEE_RECIPIENT=0x878705ba3f8bc32fcf7f4caa1a35e72af65cf766
 SPAM_ACCOUNTS=3
 SPAM_RATE=30
 
+# a running devnet must be stopped before its datadir is deleted underneath it
+if pgrep -f "ethereum-node run" >/dev/null 2>&1 || pgrep -f "bin/validator" >/dev/null 2>&1; then
+    echo ">> devnet already running; stopping it first"
+    NO_OBSERVABILITY=1 "$0" down
+    sleep 2
+fi
+
 echo ">> cleaning previous devnet state"
-rm -rf run/data run/genesis.json run/genesis.ssz
+rm -rf run/data run/genesis.json run/genesis.ssz run/spam-launcher.pid
 mkdir -p run/logs
 
-if [ ! -x bin/ethereum-node ]; then
-    echo ">> building ethereum-node"
-    go build -o bin/ethereum-node ./cmd/ethereum-node
-fi
-if [ ! -x bin/validator ]; then
-    echo ">> building prysm validator (exact version go.mod pins)"
-    # Built from this module's context: uses our pinned prysm + mirrored
-    # replaces. (`go install pkg@version` cannot: prysm's go.mod contains
-    # replace directives, which that mode rejects.)
-    go build -o bin/validator github.com/OffchainLabs/prysm/v7/cmd/validator
-fi
+# unconditional builds — Go's cache makes these near-instant, and stale
+# binaries silently running old code is worse than a moment of compiling
+echo ">> building binaries (cached)"
+go build -o bin/ethereum-node ./cmd/ethereum-node
+go build -o bin/devnet-spam ./cmd/devnet-spam
+# built from this module's context: exact pinned prysm + mirrored replaces
+# (`go install pkg@version` rejects modules with replace directives)
+go build -o bin/validator github.com/OffchainLabs/prysm/v7/cmd/validator
+
 if [ ! -d run/wallet ]; then
     echo ">> creating devnet validator wallet"
     ./bin/ethereum-node devnet-wallet --wallet-dir=run/wallet --num-validators=64
-fi
-
-if [ ! -x bin/devnet-spam ]; then
-    echo ">> building devnet-spam"
-    go build -o bin/devnet-spam ./cmd/devnet-spam
 fi
 
 # Two-pass genesis: the spam accounts must be funded BEFORE the consensus
@@ -105,7 +109,7 @@ echo "   pid $! (logs: run/logs/validator.log)"
 
 if [ "${NO_SPAM:-0}" != "1" ]; then
     echo ">> starting tx spammer (${SPAM_RATE} tx/s from ${SPAM_ACCOUNTS} accounts; NO_SPAM=1 disables)"
-    (sleep $((DELAY + 10)) && ./bin/devnet-spam --rate="${SPAM_RATE}" --num-accounts="${SPAM_ACCOUNTS}") \
+    (sleep $((DELAY + 10)) && ./bin/devnet-spam --rate="${SPAM_RATE}" --num-accounts="${SPAM_ACCOUNTS}"; rm -f run/spam-launcher.pid) \
         > run/logs/spam.log 2>&1 &
     echo $! > run/spam-launcher.pid
     echo "   pid $! (logs: run/logs/spam.log)"

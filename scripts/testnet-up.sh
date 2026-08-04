@@ -15,10 +15,8 @@ NETWORK="${1:-hoodi}"
 DATADIR="run/${NETWORK}-data"
 mkdir -p run/logs
 
-if [ ! -x bin/ethereum-node ]; then
-    echo ">> building ethereum-node"
-    go build -o bin/ethereum-node ./cmd/ethereum-node
-fi
+echo ">> building ethereum-node (cached)"
+go build -o bin/ethereum-node ./cmd/ethereum-node
 
 if [ "${NO_OBSERVABILITY:-0}" != "1" ]; then
     if docker info >/dev/null 2>&1; then

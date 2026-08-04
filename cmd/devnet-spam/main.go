@@ -49,6 +49,9 @@ func main() {
 }
 
 func run(rpcURL string, rate, numAccounts int) error {
+	if rate <= 0 || numAccounts <= 0 {
+		return fmt.Errorf("rate (%d) and num-accounts (%d) must be positive", rate, numAccounts)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -56,6 +59,7 @@ func run(rpcURL string, rate, numAccounts int) error {
 	if err != nil {
 		return err
 	}
+	defer client.Close()
 	chainID, err := client.ChainID(ctx)
 	if err != nil {
 		return err

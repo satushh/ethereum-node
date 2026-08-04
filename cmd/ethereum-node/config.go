@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 
@@ -61,7 +63,9 @@ func applyFileConfig(c *cli.Context, path string) (*fileExtras, error) {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
 	var fc fileConfig
-	if err := yaml.Unmarshal(raw, &fc); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true) // unknown section/key names are errors, not silent no-ops
+	if err := dec.Decode(&fc); err != nil && err != io.EOF {
 		return nil, fmt.Errorf("parse config file %s: %w", path, err)
 	}
 
