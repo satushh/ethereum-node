@@ -32,7 +32,7 @@
   <ul>
     <li>Both upstream clones <b>unmodified</b>; composed via Go modules (enabled by Prysm's Bazel removal)</li>
     <li>geth <code>v1.17.4</code> (exactly what prysm/go.mod imports) + prysm <code>develop</code></li>
-    <li>~420 hand-written integration lines, zero upstream changes</li>
+    <li>~1,150 hand-written integration lines, zero upstream changes</li>
     <li class="ok">Devnet-verified: a block every slot, epochs justified &amp; finalized</li>
   </ul>
 </section>
@@ -52,7 +52,7 @@
 └─────────────────────────────────────────────────────────────────────┘
                  validator client stays a separate process</pre>
   <ul>
-    <li><b>gethapp</b>: geth's public constructors called from config structs (137 lines)</li>
+    <li><b>gethapp</b>: geth's public constructors called from config structs (~290 lines)</li>
     <li><b>prysmapp</b>: upstream beacon <code>main.go</code> made importable, handed a synthesized argv</li>
     <li>Engine API semantics unchanged — same JSON, same validation, separate databases &amp; P2P</li>
   </ul>
@@ -87,7 +87,7 @@ engine transport ladder
   next   rpc.DialInProc                   no socket, no syscalls, same JSON
   later  typed EngineCaller               no JSON — payloads by reference</pre>
   <ul>
-    <li><code>--network=sepolia|mainnet</code> presets + checkpoint sync — the real product</li>
+    <li><code>--network</code> presets + one config file: <b>shipped</b> (Hoodi verified, 1h20m / 105&nbsp;GB)</li>
     <li>Root-owned globals: one metrics/tracing/log stack; EL spans inside CL block traces</li>
     <li>In-memory blob delivery &amp; payload storage dedup (stop storing every payload twice)</li>
     <li><code>--isolation=process</code> escape hatch — crash isolation back, and the A/B harness</li>

@@ -75,8 +75,9 @@ scripts/testnet-up.sh hoodi        # equivalently:
 - **Databases and P2P stacks remain separate** (`execution/` and `beacon/`
   under one datadir; devp2p and libp2p side by side) — that duplication is
   protocol design, not waste. The honest cost of one process is crash
-  isolation: a panic in either module takes down both (`--isolation=process`
-  restores separate failure domains from the same binary).
+  isolation: a panic in either module takes down both (`--isolation=process`,
+  implemented on the `isolation-ab` branch, restores separate failure domains
+  from the same binary).
 
 **How it was built.** Geth's CLI is a thin flag-parser over public
 constructors, so `internal/gethapp/` fills `node.Config`/`ethconfig.Config`
@@ -86,8 +87,9 @@ constructor reads options through a `cli.Context` across many packages, so it
 can't be struct-wired: `internal/prysmapp/` is upstream's
 `cmd/beacon-chain/main.go` copied near-verbatim into an importable package
 (deviations: `Run(ctx, argv)` entrypoint, errors returned instead of
-`log.Fatal`, a `KnownFlags` helper for config validation, log prefix), and
-the supervisor synthesizes its argv — prysm as its own CLI, in-process. Combining is then just call order:
+`log.Fatal`, a `KnownFlags` helper for config validation, log prefix, and
+upstream's help template + panic re-log wrapper omitted), and the supervisor
+synthesizes its argv — prysm as its own CLI, in-process. Combining is then just call order:
 
 ```
 1. start geth            → it creates <datadir>/execution/geth.ipc
@@ -101,14 +103,15 @@ CL genesis state; chain ID checked via `eth_chainId` on connect) —
 `ethereum-node testnet generate-genesis` (prysmctl's generator, mounted
 unchanged) emits a matching pair by construction.
 
-The entire integration (~1,200 lines, ~420 hand-written):
+The entire integration (~1,850 lines; ~1,150 hand-written once the copied
+file and the mostly-generated go.mod are excluded):
 
 | Piece | Lines | Nature |
 |---|---|---|
-| `internal/prysmapp/prysmapp.go` | ~400 | near-verbatim copy of prysm's `main.go` (upstream is `package main`) |
-| `internal/gethapp/gethapp.go` | ~200 | thin wrapper over geth's public embedding API |
-| `cmd/ethereum-node/` | ~450 | supervisor CLI, config file, isolation, devnet wallet |
-| `devnet/` + `scripts/` | ~200 | devnet fixtures |
+| `internal/prysmapp/prysmapp.go` | ~410 | near-verbatim copy of prysm's `main.go` (upstream is `package main`) |
+| `internal/gethapp/gethapp.go` | ~290 | thin wrapper over geth's public embedding API |
+| `cmd/ethereum-node/` | ~540 | supervisor CLI, config file, devnet wallet |
+| `cmd/devnet-spam/` + `devnet/` + `scripts/` | ~340 | devnet fixtures and tooling |
 | `go.mod` | ~270 | pinned versions + 1 replace mirrored from prysm's go.mod |
 
 The one upstream change that would help: Prysm exporting its app wiring as an
@@ -334,7 +337,9 @@ services this build doesn't register), and settings *can* still tune knobs
 adjacent to topology (e.g. discovery internals, metrics details) when you
 ask them to. Typos fail loudly on both sides (consensus keys checked against
 the embedded flag set; execution fields get geth's own "field not defined"
-error). Full file/inline parity: supervisor keys ↔ CLI flags,
+error; unknown top-level YAML keys in the file are rejected too). One edge:
+a zero/empty value in the file cannot override a non-zero default — use the
+CLI flag for that. Full file/inline parity: supervisor keys ↔ CLI flags,
 `consensus.settings` ↔ `--beacon-flag`, `execution.settings` ↔
 `--el-setting` (inline overrides file; `--beacon-flag` args land last on the
 synthesized argv, so they can even override supervisor-set beacon args — an
@@ -352,6 +357,10 @@ natively; only Prometheus + Grafana in Docker — a trimmed-down cousin of
 scripts/observability-up.sh        # grafana: http://127.0.0.1:3001 (no login)
 scripts/observability-up.sh down
 ```
+
+(Container-to-host scraping is verified on macOS/Docker Desktop; on native
+Linux, `host.docker.internal` is not loopback, so either run the compose
+stack with host networking or bind the exporters beyond 127.0.0.1.)
 
 Three auto-provisioned dashboards, every panel title prefixed `EL:`/`CL:`:
 
@@ -422,8 +431,10 @@ release-pairing CI of item 8 automates):
 3. `go mod tidy && go build` — the compiler is the cheap alarm.
 
 **Bumping geth:** never independently — only to what the new prysm requires.
-`gethapp` is compile-checked against geth's embedding API; network presets
-track geth's `params` (networks get added and retired upstream).
+`gethapp` is compile-checked against geth's embedding API; preset *contents*
+(genesis, bootnodes) come straight from geth's `params`, though the supported
+network names are a three-case switch in `networkPreset` that needs a line
+when upstream adds or retires one.
 
 **After any bump:** devnet smoke (block/slot, finality ~13 min, clean
 shutdown; new forks need new keys in `devnet/chain-config.yml` — fork
@@ -435,7 +446,8 @@ drift), and the README's version mentions.
 Needs **no** attention: consensus/execution settings in the config file
 (delegated to each client's own loader), engine API versions (both ends are
 upstream code, so new `engine_*Vx` methods arrive in lockstep), the devnet
-validator build (scripts install the exact pinned version).
+validator build (scripts build the exact pinned version — unless a `go.work`
+overlay is active, in which case local clones win, by design).
 
 ## Measuring against v0
 
@@ -492,9 +504,10 @@ Yes — the honest cost of one process. Both clients tolerate unclean death
 failure domains from the same binary.
 
 **Does this couple the two teams' releases?**
-No. Both develop and release independently; a bundle is a *tested pair* of
-existing releases. A security release on either side rebuilds against the
-last known-good counterpart.
+No. Both develop and release independently; a bundle pins a pair of existing
+releases (`ethereum-node version` reports exactly which), with pair *testing*
+being the devnet/Hoodi smokes today and the roadmap's CI later. A security
+release on either side rebuilds against the last known-good counterpart.
 
 **Can the embedded halves still talk to external counterparts?**
 Yes, deliberately: `ethereum-node beacon --execution-endpoint=<any EL>` is
