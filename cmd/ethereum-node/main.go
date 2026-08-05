@@ -190,6 +190,11 @@ func runNode(c *cli.Context) (retErr error) {
 			return err
 		}
 	}
+	defer func() { // generated beacon config files live for the run only
+		for _, f := range extras.TempFiles {
+			_ = os.Remove(f)
+		}
+	}()
 	datadir, err := filepath.Abs(c.String(datadirFlag.Name))
 	if err != nil {
 		return err

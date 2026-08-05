@@ -1,0 +1,56 @@
+name: devnet-smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Bring up devnet and wait for blocks
+        run: NO_OBSERVABILITY=1 WAIT_FOR_BLOCKS=1 scripts/devnet-up.sh 20
+
+      - name: Assert EL and CL heads advance
+        run: |
+          set -euo pipefail
+          block() { curl -s -X POST -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+            http://127.0.0.1:8545 | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["result"],16))'; }
+          slot() { curl -s http://127.0.0.1:3500/eth/v1/beacon/headers/head \
+            | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["data"]["header"]["message"]["slot"]))'; }
+          B1=$(block); S1=$(slot); echo "sample 1: block=$B1 slot=$S1"
+          sleep 30
+          B2=$(block); S2=$(slot); echo "sample 2: block=$B2 slot=$S2"
+          test "$B2" -gt "$B1"
+          test "$S2" -gt "$S1"
+
+      - name: Assert blocks carry transactions
+        run: |
+          TXS=$(curl -s -X POST -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["latest", false],"id":1}' \
+            http://127.0.0.1:8545 | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["result"]["transactions"]))')
+          echo "latest block txs: $TXS"
+          test "$TXS" -gt 0
+
+      - name: Tear down
+        run: scripts/devnet-up.sh down
+
+      - name: Assert nothing left running
+        run: |
+          ! pgrep -f "bin/ethereum-node run"
+          ! pgrep -f "bin/validator"
+          ! pgrep -f "bin/devnet-spam"
+
+      - name: Logs on failure
+        if: failure()
+        run: tail -50 run/logs/node.log run/logs/validator.log run/logs/spam.log 2>/dev/null || true

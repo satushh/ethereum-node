@@ -52,6 +52,7 @@ type fileConfig struct {
 type fileExtras struct {
 	BeaconArgs   []string // synthesized argv additions for the beacon node
 	GethSettings string   // TOML for gethapp's settings decoder
+	TempFiles    []string // generated files to remove when the run ends
 }
 
 // applyFileConfig loads the YAML file and applies it onto the cli context,
@@ -132,11 +133,15 @@ func applyFileConfig(c *cli.Context, path string) (*fileExtras, error) {
 			return nil, err
 		}
 		if _, err := tmp.Write(out); err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
 			return nil, err
 		}
 		if err := tmp.Close(); err != nil {
+			_ = os.Remove(tmp.Name())
 			return nil, err
 		}
+		extras.TempFiles = append(extras.TempFiles, tmp.Name())
 		extras.BeaconArgs = append(extras.BeaconArgs, "--config-file="+tmp.Name())
 	}
 	return extras, nil
