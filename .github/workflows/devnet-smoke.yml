@@ -17,6 +17,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Vet
+        run: go vet ./...
+
       - name: Bring up devnet and wait for blocks
         run: NO_OBSERVABILITY=1 WAIT_FOR_BLOCKS=1 scripts/devnet-up.sh 20
 

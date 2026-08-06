@@ -24,19 +24,33 @@ PIDFILES="run/node.pid run/validator.pid run/spam-launcher.pid"
 
 alive() { kill -0 "$1" 2>/dev/null; }
 
-# stop_pidfile <file> <name>: TERM, wait up to 10s, KILL, wait up to 3s.
-# Returns nonzero only if the process survives SIGKILL.
+# ours <pid>: the pid's command line must reference this checkout's bin/ or
+# this script (the spam launcher, pre-exec, shows the script's argv) —
+# guards against pid reuse handing us an unrelated process.
+ours() { ps -p "$1" -o args= 2>/dev/null | grep -qE "$PWD/bin/|devnet-up\.sh"; }
+
+# stop_pidfile <file> <name>: validate pid, verify identity, TERM, wait up
+# to 10s, KILL, wait up to 3s. The pid file is removed only once the process
+# is confirmed gone (or provably stale); if the process survives SIGKILL the
+# file stays and we return nonzero.
 stop_pidfile() {
     local file="$1" name="$2" pid
     [ -f "$file" ] || return 0
     pid=$(cat "$file")
-    rm -f "$file"
-    alive "$pid" || return 0
+    if ! printf '%s' "$pid" | grep -qE '^[1-9][0-9]*$'; then
+        echo ">> ignoring malformed pid file $file ('$pid')" >&2
+        rm -f "$file"
+        return 0
+    fi
+    if ! alive "$pid" || ! ours "$pid"; then
+        rm -f "$file" # dead, or pid was reused by an unrelated process
+        return 0
+    fi
     kill -TERM "$pid" 2>/dev/null || true
-    for _ in $(seq 1 10); do alive "$pid" || return 0; sleep 1; done
+    for _ in $(seq 1 10); do alive "$pid" || { rm -f "$file"; return 0; }; sleep 1; done
     echo ">> $name (pid $pid) ignored SIGTERM; escalating to SIGKILL"
     kill -KILL "$pid" 2>/dev/null || true
-    for _ in $(seq 1 3); do alive "$pid" || return 0; sleep 1; done
+    for _ in $(seq 1 3); do alive "$pid" || { rm -f "$file"; return 0; }; sleep 1; done
     echo ">> ERROR: $name (pid $pid) survived SIGKILL" >&2
     return 1
 }
@@ -137,7 +151,9 @@ cleanup_on_failure() {
 trap cleanup_on_failure EXIT
 
 echo ">> starting ethereum-node (geth + prysm beacon, one process; config: configs/devnet.yaml)"
-./bin/ethereum-node run --config configs/devnet.yaml > run/logs/node.log 2>&1 &
+# absolute paths for every long-running process: identity checks and
+# fallback patterns match on "$PWD/bin/..."
+"$PWD/bin/ethereum-node" run --config configs/devnet.yaml > run/logs/node.log 2>&1 &
 echo $! > run/node.pid
 echo "   pid $(cat run/node.pid) (logs: run/logs/node.log)"
 
@@ -162,7 +178,7 @@ wait_http "http://127.0.0.1:3500/eth/v1/node/version" "beacon API" run/node.pid 
 echo ">> node ready (EL RPC + CL API answering)"
 
 echo ">> starting prysm validator (separate process)"
-./bin/validator \
+"$PWD/bin/validator" \
     --accept-terms-of-use \
     --datadir=run/data/validator \
     --beacon-rpc-provider=127.0.0.1:4000 \
@@ -184,7 +200,10 @@ fi
 
 if [ "${NO_SPAM:-0}" != "1" ]; then
     echo ">> starting tx spammer (${SPAM_RATE} tx/s from ${SPAM_ACCOUNTS} accounts; NO_SPAM=1 disables)"
-    (sleep $((DELAY + 10)) && ./bin/devnet-spam --rate="${SPAM_RATE}" --num-accounts="${SPAM_ACCOUNTS}"; rm -f run/spam-launcher.pid) \
+    # `exec` replaces the delay shell with the spammer, so the recorded pid
+    # IS the spammer once the sleep ends — killing the pid always works,
+    # whether it is still sleeping or already spamming.
+    (sleep $((DELAY + 10)); exec "$PWD/bin/devnet-spam" --rate="${SPAM_RATE}" --num-accounts="${SPAM_ACCOUNTS}") \
         > run/logs/spam.log 2>&1 &
     echo $! > run/spam-launcher.pid
     echo "   pid $(cat run/spam-launcher.pid) (logs: run/logs/spam.log)"

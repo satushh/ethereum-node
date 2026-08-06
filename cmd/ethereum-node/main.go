@@ -245,8 +245,13 @@ func runNode(c *cli.Context) (retErr error) {
 		"--" + prysmcmd.AcceptTosFlag.Name,
 		fmt.Sprintf("--%s=%s", prysmcmd.DataDirFlag.Name, filepath.Join(datadir, "beacon")),
 		fmt.Sprintf("--%s=%s", beaconflags.ExecutionEngineEndpoint.Name, gethNode.IPCEndpoint()),
-		fmt.Sprintf("--%s=%s", beaconflags.SuggestedFeeRecipient.Name, c.String(feeRecipientFlag.Name)),
 		fmt.Sprintf("--%s=%s", prysmcmd.VerbosityFlag.Name, c.String(verbosityFlag.Name)),
+	}
+	// The devnet default fee recipient must not silently carry over to a
+	// public network: pass it only on devnets or when explicitly set.
+	if network == "" || c.IsSet(feeRecipientFlag.Name) {
+		beaconArgs = append(beaconArgs,
+			fmt.Sprintf("--%s=%s", beaconflags.SuggestedFeeRecipient.Name, c.String(feeRecipientFlag.Name)))
 	}
 	if c.Bool(metricsFlag.Name) {
 		beaconArgs = append(beaconArgs,
