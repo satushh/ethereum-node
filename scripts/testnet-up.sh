@@ -24,8 +24,9 @@ if [ "${1:-}" = "down" ]; then
             kill -TERM "$pid" 2>/dev/null || true
             for _ in $(seq 1 15); do alive "$pid" || break; sleep 1; done
             alive "$pid" && { kill -KILL "$pid" 2>/dev/null || true; sleep 2; }
+            alive "$pid" && { echo ">> ERROR: node survived SIGKILL; pid file kept" >&2; exit 1; }
         fi
-        alive "${pid:-0}" 2>/dev/null && { echo ">> ERROR: node survived SIGKILL" >&2; exit 1; }
+        # dead, malformed, or reused by an unrelated process: just clear it
         rm -f "$PIDFILE"
     fi
     if [ "${NO_OBSERVABILITY:-0}" != "1" ] && docker info >/dev/null 2>&1; then

@@ -20,14 +20,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PIDFILES="run/node.pid run/validator.pid run/spam-launcher.pid"
 
 alive() { kill -0 "$1" 2>/dev/null; }
 
-# ours <pid>: the pid's command line must reference this checkout's bin/ or
-# this script (the spam launcher, pre-exec, shows the script's argv) —
+# ours <pid>: the pid's command line must reference this checkout's bin/ —
 # guards against pid reuse handing us an unrelated process.
-ours() { ps -p "$1" -o args= 2>/dev/null | grep -qE "$PWD/bin/|devnet-up\.sh"; }
+ours() { ps -p "$1" -o args= 2>/dev/null | grep -qF "$PWD/bin/"; }
 
 # stop_pidfile <file> <name>: validate pid, verify identity, TERM, wait up
 # to 10s, KILL, wait up to 3s. The pid file is removed only once the process
@@ -57,18 +55,27 @@ stop_pidfile() {
 
 devnet_down() {
     local fail=0
-    stop_pidfile run/spam-launcher.pid "spam launcher" || fail=1
-    pkill -TERM -f "$PWD/bin/devnet-spam" 2>/dev/null || true
+    stop_pidfile run/spam.pid "tx spammer" || fail=1
     stop_pidfile run/node.pid "ethereum-node" || fail=1
     stop_pidfile run/validator.pid "validator" || fail=1
-    # fallback for processes started before pid tracking — anchored to THIS
-    # checkout's binaries so other projects' processes are never touched
-    pkill -TERM -f "$PWD/bin/ethereum-node run" 2>/dev/null || true
-    pkill -TERM -f "$PWD/bin/validator" 2>/dev/null || true
+    # fallback for strays without usable pid files — anchored to THIS
+    # checkout's binaries so other projects' processes are never touched,
+    # with the same TERM -> wait -> KILL -> verify contract as above
+    local pattern="$PWD/bin/(ethereum-node run|validator|devnet-spam)"
+    pkill -TERM -f "$pattern" 2>/dev/null || true
     for _ in $(seq 1 10); do
-        pgrep -f "$PWD/bin/(ethereum-node run|validator|devnet-spam)" >/dev/null 2>&1 || break
+        pgrep -f "$pattern" >/dev/null 2>&1 || break
         sleep 1
     done
+    if pgrep -f "$pattern" >/dev/null 2>&1; then
+        echo ">> stray processes ignored SIGTERM; escalating to SIGKILL"
+        pkill -KILL -f "$pattern" 2>/dev/null || true
+        sleep 2
+        if pgrep -f "$pattern" >/dev/null 2>&1; then
+            echo ">> ERROR: stray processes survived SIGKILL" >&2
+            fail=1
+        fi
+    fi
     if [ "${NO_OBSERVABILITY:-0}" != "1" ] && docker info >/dev/null 2>&1; then
         "$(dirname "$0")/observability-up.sh" down
     fi
@@ -200,13 +207,13 @@ fi
 
 if [ "${NO_SPAM:-0}" != "1" ]; then
     echo ">> starting tx spammer (${SPAM_RATE} tx/s from ${SPAM_ACCOUNTS} accounts; NO_SPAM=1 disables)"
-    # `exec` replaces the delay shell with the spammer, so the recorded pid
-    # IS the spammer once the sleep ends — killing the pid always works,
-    # whether it is still sleeping or already spamming.
-    (sleep $((DELAY + 10)); exec "$PWD/bin/devnet-spam" --rate="${SPAM_RATE}" --num-accounts="${SPAM_ACCOUNTS}") \
+    # started immediately — geth's RPC already passed the readiness gate,
+    # and pre-genesis transactions simply pool up for the first blocks. No
+    # delay wrapper means the recorded pid is the spammer, always.
+    "$PWD/bin/devnet-spam" --rate="${SPAM_RATE}" --num-accounts="${SPAM_ACCOUNTS}" \
         > run/logs/spam.log 2>&1 &
-    echo $! > run/spam-launcher.pid
-    echo "   pid $(cat run/spam-launcher.pid) (logs: run/logs/spam.log)"
+    echo $! > run/spam.pid
+    echo "   pid $(cat run/spam.pid) (logs: run/logs/spam.log)"
 fi
 
 if [ "${NO_OBSERVABILITY:-0}" != "1" ]; then
