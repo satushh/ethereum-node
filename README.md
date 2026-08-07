@@ -114,10 +114,10 @@ file and the mostly-generated go.mod are excluded):
 | `cmd/devnet-spam/` + `devnet/` + `scripts/` | ~340 | devnet fixtures and tooling |
 | `go.mod` | ~270 | pinned versions + 1 replace mirrored from prysm's go.mod |
 
-The one upstream change that would help: Prysm exporting its app wiring as an
-importable package (`runtime/beaconapp`) — that deletes the copied file and
-makes this pure composition. Geth needs nothing; its embedding surface is
-already public.
+The upstream changes that would help most are small and listed in
+[Upstream PRs to propose](#upstream-prs-to-propose) — chief among them Prysm
+exporting its app wiring as an importable package, which deletes the copied
+file and makes this pure composition.
 
 ## How a slot flows through the process
 
@@ -384,44 +384,85 @@ Three auto-provisioned dashboards, every panel title prefixed `EL:`/`CL:`:
 Quirk worth knowing: geth v1.17.4 declares `chain/inserts` but never updates
 it (dead metric), so block-processing timing comes from Prysm's
 `state_transition_processing_milliseconds`. Still two metrics stacks scraped
-separately — one root-owned registry is roadmap item 2.
+separately — one root-owned registry is roadmap item 4.
 
 ## Roadmap
 
 **Status:** item 1 shipped (network presets verified on Hoodi + the single
-config file), devnet observability shipped, item 7 (`--isolation=process`)
-implemented with first A/B numbers on the `isolation-ab` branch. Next: item 2.
+config file), devnet observability shipped, item 8 (`--isolation=process`)
+implemented with first A/B numbers on the `isolation-ab` branch. Next: item 2
+(release pipeline) and the upstream PRs below, which unblock item 3.
 
 1. **Network presets + one config file** — done (see above).
-2. **Root-owned process globals** — one logging setup, one OTel provider, one
-   Prometheus registry/endpoint, one pprof. Today the modules can fight over
-   globals (Prysm's trace-verbosity path overwrites the geth log handler).
-   Buys coherent observability and no last-writer-wins config bugs.
+2. **Release pairing + packaging** — versions.lock of tested (geth, prysm)
+   pairs, CI, reproducible builds (riding Prysm's Docker-based release
+   work), published binaries + images with a signing story for the combined
+   artifact, `.deb` + systemd, a `doctor` endpoint. Buys
+   `apt install ethereum-node` — and it is the prerequisite for announcing
+   anything wider.
 3. **Engine transport ladder** — `rpc.DialInProc` (no socket, same JSON),
    then a typed `EngineCaller` on `catalyst.ConsensusAPI` (no JSON). The
    serialized path stays as compatibility boundary and differential-test
-   oracle. Buys proposal-path latency and allocation churn.
-4. **In-memory blob delivery** — `getBlobsV2/V3` by reference instead of
+   oracle. Buys proposal-path latency and allocation churn. Blocked on the
+   injection seam PR (see Upstream PRs).
+4. **Root-owned process globals** — one logging setup, one OTel provider, one
+   Prometheus registry/endpoint, one pprof. Today the modules can fight over
+   globals (Prysm's trace-verbosity path overwrites the geth log handler).
+   Buys coherent observability and no last-writer-wins config bugs.
+5. **In-memory blob delivery** — `getBlobsV2/V3` by reference instead of
    hex-JSON; the largest per-slot byte movement disappears.
-5. **Payload storage dedup** — stop storing every payload twice; the biggest
-   disk win, needs careful pruning coordination.
-6. **Shared scheduling/backpressure** — CL slot deadlines ↔ EL sync/compaction
-   pressure, instead of timeout guessing; fewer missed duties on small boxes.
-7. **`--isolation=process`** — same binary, supervised child processes:
+6. **Payload storage dedup** — stop storing every payload twice; dedicated
+   DBs stay, the EL exposes a read API instead (schema unification would
+   couple the teams' migrations — the coupling this project exists to
+   avoid). The biggest disk win; needs careful pruning coordination.
+7. **Shared scheduling/backpressure and sync coordination** — CL slot
+   deadlines ↔ EL sync/compaction pressure instead of timeout guessing; the
+   longer-term inversion (CL-driven EL sync: forward-feed and backfill
+   instead of FCU-triggered independent download) is a substantial upstream
+   sync rework, so the first step is measuring the redundant download/storage
+   during a fresh public-network sync from this node's single log stream.
+8. **`--isolation=process`** — same binary, supervised child processes:
    crash isolation back, and the honest A/B harness (only the process
-   boundary flips).
-8. **Release pairing + packaging** — versions.lock of tested (geth, prysm)
-   pairs, CI, reproducible builds, `.deb` + systemd, a `doctor` endpoint;
-   rides Prysm's Bazel-removal release work. Buys `apt install ethereum-node`.
-9. **Upstream `beaconapp` export** — deletes the one copied file; pure
-   composition.
-10. **Shared networking substrate** (ethp2p) — out of scope until the
-    protocol work matures.
+   boundary flips). Implemented on the `isolation-ab` branch.
+9. **Shared networking substrate** (ethp2p) — out of scope until the
+   protocol work matures.
+
+## Upstream PRs to propose
+
+Small, self-contained changes to the upstream projects that this repo is the
+concrete consumer for (details and file references in Upstream
+observations):
+
+**Prysm:**
+
+1. **Execution-client injection seam** — an option on the execution service
+   to supply a ready RPC client (or an `EngineCaller` implementation)
+   instead of only an endpoint string. Unblocks the in-process and typed
+   engine transports (roadmap 3) without patches.
+2. **Importable app wiring** (`beaconapp`-style package with a thin
+   `cmd/beacon-chain` shim) — deletes this repo's one copied file and makes
+   the composition pure.
+3. **Attach the error to the genesis-provider failure log**
+   (`genesis/initialize.go`) — a one-liner that turns an invisible
+   misconfiguration into a diagnosable one.
+4. **Latency histograms for `engine_newPayload` / `engine_forkchoiceUpdated`**
+   — the two hottest engine calls are currently unobservable without log
+   parsing.
+
+**Geth:**
+
+1. **Error-returning variants of the `cmd/utils` registration helpers**
+   (`RegisterEthService` and friends call `Fatalf` today) — makes the
+   otherwise excellent embedding surface safe for hosts that need cleanup.
+2. **Fix or remove the dead `chain/inserts` metric** and consider restoring
+   a block-import timing summary.
+3. **Fail fast on over-long IPC paths** with the limit in the error text,
+   instead of a later cryptic `bind: invalid argument`.
 
 ## Version bump checklist
 
 What to check when a new prysm or geth release lands (this is what the
-release-pairing CI of item 8 automates):
+release-pairing CI of item 2 automates):
 
 **Bumping prysm** (`go.mod` require → new tag):
 
@@ -466,14 +507,14 @@ future rung:
 ```
  A  two processes, engine over IPC     the realistic baseline / --isolation=process
  B  this v0: one process, IPC JSON     scripts/devnet-up.sh
- C  one process, rpc.DialInProc        roadmap #3, first rung
- D  one process, typed EngineCaller    roadmap #3, second rung
+ C  one process, rpc.DialInProc        roadmap 3, first rung
+ D  one process, typed EngineCaller    roadmap 3, second rung
 ```
 
 - **Proposal/import latency** from the node's own logs (`sinceSlotStartTime`,
   `elapsed=`) — no instrumentation needed.
 - **Engine bytes**: counting proxy on the endpoint for A–C; D is zero by
-  construction. **Resource**: RSS/CPU sampling + pprof. **Disk** (for #5):
+  construction. **Resource**: RSS/CPU sampling + pprof. **Disk** (for roadmap 6):
   `du` per module after fixed epochs under identical load.
 - **Guardrails**: missed proposals, attestation inclusion distance, reorgs.
 - Discipline, learned on this machine: keep the box awake (`caffeinate`),
@@ -501,7 +542,7 @@ core invariant: Prysm's imports and the running EL are the same code.
 The known list: logging (two formatters share stderr; Prysm's trace-verbosity
 path overwrites the geth log handler), metrics registries, pprof, GOMAXPROCS
 (Prysm's automaxprocs import), signal handlers (Prysm's is deliberately the
-shutdown driver). Root-owned globals is roadmap item 2 and a hard requirement
+shutdown driver). Root-owned globals is roadmap item 4 and a hard requirement
 before anything production-shaped.
 
 **A panic in one module kills both, right?**
