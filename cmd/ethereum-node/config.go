@@ -34,6 +34,7 @@ type fileConfig struct {
 		CheckpointSyncURL string `yaml:"checkpoint-sync-url"`
 	} `yaml:"node"`
 	Execution struct {
+		Datadir     string `yaml:"datadir"` // override; e.g. an existing geth datadir to resume
 		HTTPPort    int    `yaml:"http-port"`
 		AuthrpcPort int    `yaml:"authrpc-port"`
 		P2PListen   string `yaml:"p2p-listen"`
@@ -41,6 +42,7 @@ type fileConfig struct {
 		Settings    string `yaml:"settings"` // geth-native TOML (dumpconfig format), full geth option surface
 	} `yaml:"execution"`
 	Consensus struct {
+		Datadir      string         `yaml:"datadir"` // override; e.g. an existing prysm datadir to resume
 		GenesisState string         `yaml:"genesis-state"`
 		ChainConfig  string         `yaml:"chain-config"`
 		Settings     map[string]any `yaml:"settings"` // upstream prysm flag names, full beacon option surface
@@ -78,6 +80,8 @@ func applyFileConfig(c *cli.Context, path string) (*fileExtras, error) {
 	}
 	for flagName, value := range map[string]string{
 		datadirFlag.Name:        fc.Node.Datadir,
+		elDatadirFlag.Name:      fc.Execution.Datadir,
+		clDatadirFlag.Name:      fc.Consensus.Datadir,
 		networkFlag.Name:        fc.Node.Network,
 		verbosityFlag.Name:      fc.Node.Verbosity,
 		feeRecipientFlag.Name:   fc.Node.FeeRecipient,

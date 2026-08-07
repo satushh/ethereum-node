@@ -65,6 +65,14 @@ var (
 		Usage: "Root data directory; execution/ and beacon/ subdirectories are created inside",
 		Value: "./ethereum-node-data",
 	}
+	elDatadirFlag = &cli.StringFlag{
+		Name:  "el-datadir",
+		Usage: "Execution datadir override (e.g. an existing geth datadir to resume); default <datadir>/execution",
+	}
+	clDatadirFlag = &cli.StringFlag{
+		Name:  "cl-datadir",
+		Usage: "Consensus datadir override (e.g. an existing prysm datadir to resume); default <datadir>/beacon",
+	}
 	configFlag = &cli.StringFlag{
 		Name:  "config",
 		Usage: "YAML config file with node/execution/consensus sections; explicit CLI flags override file values",
@@ -173,7 +181,8 @@ func runCommand() *cli.Command {
 		Name:  "run",
 		Usage: "Run the combined execution + consensus node",
 		Flags: []cli.Flag{
-			configFlag, datadirFlag, networkFlag, checkpointURLFlag,
+			configFlag, datadirFlag, elDatadirFlag, clDatadirFlag,
+			networkFlag, checkpointURLFlag,
 			elGenesisFlag, clGenesisStateFlag, clChainConfigFlag,
 			httpPortFlag, authPortFlag, p2pListenFlag, feeRecipientFlag,
 			verbosityFlag, metricsFlag, beaconFlagPassthrough, elSettingFlag,
@@ -199,6 +208,21 @@ func runNode(c *cli.Context) (retErr error) {
 	if err != nil {
 		return err
 	}
+	// Per-module overrides let an existing standalone geth/prysm datadir be
+	// resumed in place (the on-disk layouts are identical); the clients'
+	// own genesis checks reject a mismatched network.
+	elDataDir := filepath.Join(datadir, "execution")
+	if v := c.String(elDatadirFlag.Name); v != "" {
+		if elDataDir, err = filepath.Abs(v); err != nil {
+			return err
+		}
+	}
+	clDataDir := filepath.Join(datadir, "beacon")
+	if v := c.String(clDatadirFlag.Name); v != "" {
+		if clDataDir, err = filepath.Abs(v); err != nil {
+			return err
+		}
+	}
 	network := c.String(networkFlag.Name)
 	if network != "" && c.String(elGenesisFlag.Name) != "" {
 		return fmt.Errorf("--%s and --%s are mutually exclusive", networkFlag.Name, elGenesisFlag.Name)
@@ -209,15 +233,15 @@ func runNode(c *cli.Context) (retErr error) {
 	}
 
 	fmt.Printf("ethereum-node %s starting\n", bundleVersion)
-	fmt.Printf("  execution: geth v%d.%d.%d-%s -> %s\n", gethversion.Major, gethversion.Minor, gethversion.Patch, gethversion.Meta, filepath.Join(datadir, "execution"))
-	fmt.Printf("  consensus: prysm %s -> %s\n", prysmModuleVersion(), filepath.Join(datadir, "beacon"))
+	fmt.Printf("  execution: geth v%d.%d.%d-%s -> %s\n", gethversion.Major, gethversion.Minor, gethversion.Patch, gethversion.Meta, elDataDir)
+	fmt.Printf("  consensus: prysm %s -> %s\n", prysmModuleVersion(), clDataDir)
 
 	gethMetricsPort := 0
 	if c.Bool(metricsFlag.Name) {
 		gethMetricsPort = 6060
 	}
 	gethNode, err := gethapp.Start(gethapp.Config{
-		DataDir:      filepath.Join(datadir, "execution"),
+		DataDir:      elDataDir,
 		Network:      network,
 		GenesisPath:  c.String(elGenesisFlag.Name),
 		HTTPHost:     "127.0.0.1",
@@ -243,7 +267,7 @@ func runNode(c *cli.Context) (retErr error) {
 	beaconArgs := []string{
 		"beacon-chain",
 		"--" + prysmcmd.AcceptTosFlag.Name,
-		fmt.Sprintf("--%s=%s", prysmcmd.DataDirFlag.Name, filepath.Join(datadir, "beacon")),
+		fmt.Sprintf("--%s=%s", prysmcmd.DataDirFlag.Name, clDataDir),
 		fmt.Sprintf("--%s=%s", beaconflags.ExecutionEngineEndpoint.Name, gethNode.IPCEndpoint()),
 		fmt.Sprintf("--%s=%s", prysmcmd.VerbosityFlag.Name, c.String(verbosityFlag.Name)),
 	}

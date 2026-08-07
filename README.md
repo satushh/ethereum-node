@@ -301,6 +301,12 @@ default `https://checkpoint-sync.<network>.ethpandaops.io`).
   self-prunes after ~18 days; add `beacon-db-pruning: true` to cap the
   beacon DB.
 - A following node — no validator keys involved.
+- **Adopting existing datadirs:** on-disk layouts are identical to the
+  standalone clients', so `execution.datadir` / `consensus.datadir` (or
+  `--el-datadir` / `--cl-datadir`) can point straight at an existing geth /
+  prysm datadir and resume it in place — the clients' own genesis checks
+  reject a wrong network. Data must come from client versions no newer than
+  the pinned pair (DB schemas migrate forward, not back).
 
 ## Single config file
 
