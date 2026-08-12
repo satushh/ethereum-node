@@ -9,6 +9,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -16,12 +17,14 @@ import (
 	"runtime/debug"
 	"strings"
 
+	beaconexecution "github.com/OffchainLabs/prysm/v7/beacon-chain/execution"
 	prysmcmd "github.com/OffchainLabs/prysm/v7/cmd"
 	beaconflags "github.com/OffchainLabs/prysm/v7/cmd/beacon-chain/flags"
 	beacongenesis "github.com/OffchainLabs/prysm/v7/cmd/beacon-chain/genesis"
 	checkpoint "github.com/OffchainLabs/prysm/v7/cmd/beacon-chain/sync/checkpoint"
 	testnetcmds "github.com/OffchainLabs/prysm/v7/cmd/prysmctl/testnet"
 	prysmversion "github.com/OffchainLabs/prysm/v7/runtime/version"
+	gethrpc "github.com/ethereum/go-ethereum/rpc"
 	gethversion "github.com/ethereum/go-ethereum/version"
 	"github.com/urfave/cli/v2"
 
@@ -107,6 +110,11 @@ var (
 		Usage: "Authenticated engine API port on 127.0.0.1 (escape hatch for external consensus clients; the embedded one uses IPC)",
 		Value: 8551,
 	}
+	engineTransportFlag = &cli.StringFlag{
+		Name:  "engine-transport",
+		Usage: "Engine API transport between the embedded modules: ipc (geth's in-datadir socket) or inproc (direct in-process client, no socket; needs the prysm injection seam)",
+		Value: "ipc",
+	}
 	p2pListenFlag = &cli.StringFlag{
 		Name:  "p2p.listen",
 		Usage: "devp2p listen address for the execution module",
@@ -184,7 +192,7 @@ func runCommand() *cli.Command {
 			configFlag, datadirFlag, elDatadirFlag, clDatadirFlag,
 			networkFlag, checkpointURLFlag,
 			elGenesisFlag, clGenesisStateFlag, clChainConfigFlag,
-			httpPortFlag, authPortFlag, p2pListenFlag, feeRecipientFlag,
+			httpPortFlag, authPortFlag, engineTransportFlag, p2pListenFlag, feeRecipientFlag,
 			verbosityFlag, metricsFlag, beaconFlagPassthrough, elSettingFlag,
 		},
 		Action: runNode,
@@ -227,6 +235,10 @@ func runNode(c *cli.Context) (retErr error) {
 	if network != "" && c.String(elGenesisFlag.Name) != "" {
 		return fmt.Errorf("--%s and --%s are mutually exclusive", networkFlag.Name, elGenesisFlag.Name)
 	}
+	engineTransport := c.String(engineTransportFlag.Name)
+	if engineTransport != "ipc" && engineTransport != "inproc" {
+		return fmt.Errorf("--%s must be \"ipc\" or \"inproc\", got %q", engineTransportFlag.Name, engineTransport)
+	}
 	p2pListen := c.String(p2pListenFlag.Name)
 	if network != "" && !c.IsSet(p2pListenFlag.Name) {
 		p2pListen = ":30303" // public networks need inbound-capable devp2p
@@ -262,7 +274,11 @@ func runNode(c *cli.Context) (retErr error) {
 			retErr = errors.Join(retErr, fmt.Errorf("execution module shutdown: %w", err))
 		}
 	}()
-	fmt.Printf("  engine API: %s (in-datadir IPC, no JWT needed)\n", gethNode.IPCEndpoint())
+	if engineTransport == "inproc" {
+		fmt.Printf("  engine API: in-process (direct attach to geth's RPC handler, no socket)\n")
+	} else {
+		fmt.Printf("  engine API: %s (in-datadir IPC, no JWT needed)\n", gethNode.IPCEndpoint())
+	}
 
 	beaconArgs := []string{
 		"beacon-chain",
@@ -307,9 +323,19 @@ func runNode(c *cli.Context) (retErr error) {
 		beaconArgs = append(beaconArgs, "--"+f)
 	}
 
+	// With the default ipc transport Prysm dials the endpoint passed above;
+	// with inproc it receives a dialer handing out direct in-process clients
+	// instead. The endpoint argument stays either way — the injected dialer
+	// takes precedence inside the execution service.
+	var execOpts []beaconexecution.Option
+	if engineTransport == "inproc" {
+		execOpts = append(execOpts, beaconexecution.WithRPCClientDialer(
+			func(context.Context) (*gethrpc.Client, error) { return gethNode.Attach(), nil }))
+	}
+
 	// Blocks until shutdown; Prysm handles SIGINT/SIGTERM itself, then the
 	// deferred Close above tears down the execution module.
-	return prysmapp.Run(c.Context, beaconArgs)
+	return prysmapp.Run(c.Context, beaconArgs, execOpts...)
 }
 
 func beaconCommand() *cli.Command {
