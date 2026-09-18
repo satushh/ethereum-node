@@ -390,8 +390,12 @@ separately — one root-owned registry is roadmap item 4.
 
 **Status:** item 1 shipped (network presets verified on Hoodi + the single
 config file), devnet observability shipped, item 8 (`--isolation=process`)
-implemented with first A/B numbers on the `isolation-ab` branch. Next: item 2
-(release pipeline) and the upstream PRs below, which unblock item 3.
+implemented with first A/B numbers on the `isolation-ab` branch. The
+injection-seam PR is merged upstream
+([prysm#17334](https://github.com/OffchainLabs/prysm/pull/17334), 2026-09-09)
+and the pinned prysm now contains it, so item 3 is unblocked; its first rung
+is implemented and measured on the `engine-inproc-ab` branch, ready to fold
+into main. Next: item 2 (release pipeline).
 
 1. **Network presets + one config file** — done (see above).
 2. **Release pairing + packaging** — versions.lock of tested (geth, prysm)
@@ -403,8 +407,9 @@ implemented with first A/B numbers on the `isolation-ab` branch. Next: item 2
 3. **Engine transport ladder** — `rpc.DialInProc` (no socket, same JSON),
    then a typed `EngineCaller` on `catalyst.ConsensusAPI` (no JSON). The
    serialized path stays as compatibility boundary and differential-test
-   oracle. Buys proposal-path latency and allocation churn. Blocked on the
-   injection seam PR (see Upstream PRs).
+   oracle. Buys proposal-path latency and allocation churn. The seam it
+   needs is merged upstream (prysm#17334, `execution.WithRPCClientDialer`);
+   the first rung is implemented on the `engine-inproc-ab` branch.
 4. **Root-owned process globals** — one logging setup, one OTel provider, one
    Prometheus registry/endpoint, one pprof. Today the modules can fight over
    globals (Prysm's trace-verbosity path overwrites the geth log handler).
@@ -438,16 +443,24 @@ observations):
 1. **Execution-client injection seam** — an option on the execution service
    to supply a ready RPC client (or an `EngineCaller` implementation)
    instead of only an endpoint string. Unblocks the in-process and typed
-   engine transports (roadmap 3) without patches.
+   engine transports (roadmap 3) without patches. **Merged:
+   [prysm#17334](https://github.com/OffchainLabs/prysm/pull/17334)**
+   (`execution.WithRPCClientDialer`, 2026-09-09); contained in the pinned
+   prysm as of develop @ `011d013`.
 2. **Importable app wiring** (`beaconapp`-style package with a thin
    `cmd/beacon-chain` shim) — deletes this repo's one copied file and makes
    the composition pure.
 3. **Attach the error to the genesis-provider failure log**
-   (`genesis/initialize.go`) — a one-liner that turns an invisible
-   misconfiguration into a diagnosable one.
-4. **Latency histograms for `engine_newPayload` / `engine_forkchoiceUpdated`**
-   — the two hottest engine calls are currently unobservable without log
-   parsing.
+   (`genesis/initialize.go`) — **resolved upstream**: as of develop @
+   `011d013` the log carries `WithError(err)`; nothing left to propose.
+4. **Sub-millisecond engine latency observations** — the engine-call
+   histograms exist after all (see the corrected observation below), but
+   they observe integer-truncated `.Milliseconds()` into buckets flooring
+   at 25 ms: sub-millisecond calls record as zero and everything under
+   25 ms lands in one bucket. Float observations + finer buckets is a
+   two-line change, proven during the #17334 A/B (the fix ships in the
+   `pr-17334-ab` measurement branch), where truncation would have erased
+   the entire measured effect.
 
 **Geth:**
 
@@ -583,14 +596,18 @@ for upstream issues/PRs.
 - An over-long IPC path (~104-char OS limit) warns, then fails with a cryptic
   `bind: invalid argument`; failing fast with the warning's text would help.
 
-**Prysm (develop @ ce28535):**
+**Prysm (develop @ 011d013):**
 
-- `genesis/initialize.go:41` logs `genesis provider failed` *without the
-  error* — a misconfigured checkpoint URL becomes an invisible failure. One
-  `WithError(err)` fixes it.
-- No latency histograms for `engine_newPayload`/`engine_forkchoiceUpdated`
-  (only the getBlobs family has them) — the two hottest engine calls are
-  unobservable without log parsing.
+- `genesis/initialize.go:41` logged `genesis provider failed` *without the
+  error*, turning a misconfigured checkpoint URL into an invisible failure;
+  fixed upstream (the log now carries `WithError(err)`), so this observation
+  is closed.
+- Engine-call latency histograms exist (`new_payload_v1_latency_milliseconds`
+  and friends — easy to miss: unlike the `beacon_engine_getBlobs*` family
+  their names don't contain "engine"; an earlier revision of this list
+  wrongly claimed they were absent) but observe integer-truncated
+  `.Milliseconds()` into buckets flooring at 25 ms — sub-millisecond calls
+  record as zero, and every call under 25 ms is indistinguishable.
 - `cmd/beacon-chain` is `package main` with config read through `cli.Context`
   across packages — embedding requires copying `main.go`; an importable app
   package (`runtime/beaconapp`) would fix it. This repo is the concrete
