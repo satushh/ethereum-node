@@ -51,6 +51,8 @@ asserts verified teardown — keep it green.
   params (a different layer than `configs/devnet.yaml`)
 - `observability/` — prometheus + grafana compose; dashboards are validated
   against live exporter metric names (they drift across releases)
+- `packaging/` — nfpm `.deb` spec + systemd unit; `release.yml` signs and
+  publishes the apt repo to `gh-pages` on tag push (setup: packaging/README.md)
 - Branch `isolation-ab` — `--isolation=process` + the A/B benchmark harness
 
 ## Process notes

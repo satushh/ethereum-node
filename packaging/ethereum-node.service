@@ -1,0 +1,25 @@
+[Unit]
+Description=Ethereum node: geth (execution) + prysm (beacon), one process
+Documentation=https://github.com/satushh/ethereum-node
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ethereum-node
+Group=ethereum-node
+# Creates and owns /var/lib/ethereum-node.
+StateDirectory=ethereum-node
+ExecStart=/usr/bin/ethereum-node run --config /etc/ethereum-node/config.yaml --datadir /var/lib/ethereum-node
+Restart=on-failure
+RestartSec=5
+# A clean chain-database shutdown can take a while; don't SIGKILL it early.
+TimeoutStopSec=300
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

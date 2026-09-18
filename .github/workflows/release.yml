@@ -1,0 +1,140 @@
+name: release
+
+# Tag push (v*) builds signed .debs for amd64+arm64 and publishes them to the
+# apt repository on the gh-pages branch (served by GitHub Pages) plus a GitHub
+# Release. workflow_dispatch is the dry run: build + package + artifacts only.
+#
+# One-time setup this workflow needs (details: packaging/README.md):
+#   - repo secret APT_SIGNING_KEY: ASCII-armored GPG private signing key
+#   - GitHub Pages enabled, serving the gh-pages branch root
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        include:
+          # ubuntu-22.04 keeps the glibc baseline old (2.35): the cgo binary
+          # (blst) runs on anything at least that new.
+          - runner: ubuntu-22.04
+            arch: amd64
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Pair check
+        run: scripts/check-pair.sh
+
+      - name: Build
+        run: |
+          mkdir -p dist
+          go build -trimpath -o dist/ethereum-node ./cmd/ethereum-node
+          dist/ethereum-node version
+
+      - name: Package .deb
+        env:
+          TAG: ${{ github.ref_name }}
+          ARCH: ${{ matrix.arch }}
+          BINARY: dist/ethereum-node
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${TAG#v}"
+          else
+            VERSION="0.0.0~dev${GITHUB_RUN_NUMBER}"   # workflow_dispatch dry run
+          fi
+          export VERSION
+          go run github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0 \
+            package -f packaging/nfpm.yaml -p deb -t dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.arch }}
+          path: dist/*.deb
+          if-no-files-found: error
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: debs
+          merge-multiple: true
+
+      - name: Import signing key
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APT_SIGNING_KEY}" ]; then
+            echo "FAIL: repo secret APT_SIGNING_KEY is not set (see packaging/README.md)"; exit 1
+          fi
+          printf '%s' "${APT_SIGNING_KEY}" | gpg --batch --import
+
+      - name: Assemble and sign the apt repository (gh-pages)
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq dpkg-dev apt-utils >/dev/null
+
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git clone --depth 1 --branch gh-pages "${REMOTE}" site 2>/dev/null || {
+            git init -b gh-pages site
+            git -C site remote add origin "${REMOTE}"
+          }
+
+          mkdir -p site/pool site/dists/stable/main/binary-amd64 site/dists/stable/main/binary-arm64
+          cp debs/*.deb site/pool/
+
+          cd site
+          dpkg-scanpackages --arch amd64 pool /dev/null > dists/stable/main/binary-amd64/Packages
+          dpkg-scanpackages --arch arm64 pool /dev/null > dists/stable/main/binary-arm64/Packages
+          gzip -kf dists/stable/main/binary-amd64/Packages dists/stable/main/binary-arm64/Packages
+          apt-ftparchive \
+            -o APT::FTPArchive::Release::Origin=ethereum-node \
+            -o APT::FTPArchive::Release::Label=ethereum-node \
+            -o APT::FTPArchive::Release::Suite=stable \
+            -o APT::FTPArchive::Release::Codename=stable \
+            -o "APT::FTPArchive::Release::Architectures=amd64 arm64" \
+            -o APT::FTPArchive::Release::Components=main \
+            release dists/stable > dists/stable/Release
+          gpg --batch --yes -abs -o dists/stable/Release.gpg dists/stable/Release
+          gpg --batch --yes --clearsign -o dists/stable/InRelease dists/stable/Release
+          gpg --batch --export > key.gpg
+
+          git add -A
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "apt repo: ${TAG}"
+          git push origin gh-pages
+
+      - name: GitHub Release with the .debs
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PAIR=$(sed -n 's/^- prysm: *\([^ ]*\).*/prysm \1/p' versions.lock | head -1)
+          GETH=$(awk '$1=="geth:"{print $2; exit}' versions.lock)
+          gh release create "${TAG}" debs/*.deb \
+            --title "${TAG}" \
+            --notes "Tested pair: ${PAIR}, geth ${GETH} (versions.lock). Install: see packaging/README.md."

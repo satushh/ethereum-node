@@ -1,5 +1,6 @@
 # build artifacts
 bin/
+dist/
 
 # local-dev workspace overlay pointing at sibling client clones
 go.work

@@ -1,0 +1,22 @@
+# /etc/ethereum-node/config.yaml — read by the systemd unit's
+# `ethereum-node run --config ...`. Precedence: CLI flags > this file >
+# defaults; the unit pins the datadir to /var/lib/ethereum-node.
+node:
+  # Public network preset: hoodi | sepolia | mainnet (built-in genesis +
+  # bootnodes, snap sync, checkpoint sync). Ships pointing at the Hoodi
+  # testnet; switch to mainnet deliberately — it brings its own disk and
+  # bandwidth budget.
+  network: hoodi
+  # checkpoint-sync-url: https://...   # unset = the preset's default
+
+# The full upstream option surfaces are available, delegated to each
+# client's own loader (typos fail loudly):
+#
+# consensus:
+#   settings:                  # prysm flag names, verbatim
+#     beacon-db-pruning: true
+#
+# execution:
+#   settings: |                # geth-native TOML (`geth dumpconfig` format)
+#     [Eth]
+#     DatabaseCache = 4096

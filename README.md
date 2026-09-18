@@ -395,9 +395,10 @@ first rung (`--engine-transport=inproc`) merged into main, measured against
 the injection-seam PR that is now merged upstream
 ([prysm#17334](https://github.com/OffchainLabs/prysm/pull/17334), 2026-09-09;
 numbers under Upstream PRs) and contained in the pinned prysm. Item 2 is
-started: `versions.lock` records tested pairs and `scripts/check-pair.sh`
-enforces the pair invariants in CI; reproducible builds, signed artifacts,
-`.deb` + systemd, and the `doctor` endpoint remain.
+started: `versions.lock` + the CI pair check are in, and the `.deb` +
+signed-apt-repo release workflow is built and container-tested (first
+publish pending the one-time setup in `packaging/README.md`); reproducible
+builds, container images, and the `doctor` endpoint remain.
 
 1. **Network presets + one config file** — done (see above).
 2. **Release pairing + packaging** — versions.lock of tested (geth, prysm)
@@ -408,7 +409,13 @@ enforces the pair invariants in CI; reproducible builds, signed artifacts,
    anything wider. *Started:* `versions.lock` (tested pairs) and the CI pair
    check (`scripts/check-pair.sh`) are in. Packaging decision: a self-hosted
    apt repository (prebuilt signed `.deb`s serve Debian and Ubuntu, and users
-   run the exact tested binary); a Launchpad PPA can layer on later.
+   run the exact tested binary); a Launchpad PPA can layer on later. The
+   `.deb` itself (systemd unit, `ethereum-node` system user, Hoodi-default
+   conffile) and the tag-triggered workflow that signs and publishes the apt
+   repo to `gh-pages` are in (`packaging/`,
+   `.github/workflows/release.yml`), install-tested in a clean Debian
+   container; the first real publish needs the one-time setup in
+   `packaging/README.md` (signing-key secret, Pages) and a tag.
 3. **Engine transport ladder** — `rpc.DialInProc` (no socket, same JSON),
    then a typed `EngineCaller` on `catalyst.ConsensusAPI` (no JSON). The
    serialized path stays as compatibility boundary and differential-test

@@ -1,0 +1,32 @@
+# .deb spec for the combined binary; packaged by nfpm (pure Go, runs
+# anywhere). The release workflow and packaging/README.md set the
+# environment nfpm substitutes here:
+#   VERSION  deb version, no leading v (e.g. 0.1.0)
+#   ARCH     amd64 | arm64
+# The payload is always the linux binary at dist/ethereum-node.
+name: ethereum-node
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: satushh <sdas@offchainlabs.com>
+homepage: https://github.com/satushh/ethereum-node
+license: GPL-3.0
+description: |
+  Geth (execution) and Prysm (beacon) as one binary and one process.
+  Unmodified upstream clients joined by the standard Engine API;
+  `ethereum-node version` reports the exact tested (geth, prysm) pair.
+depends:
+  - libc6
+contents:
+  - src: dist/ethereum-node
+    dst: /usr/bin/ethereum-node
+  - src: packaging/ethereum-node.service
+    dst: /usr/lib/systemd/system/ethereum-node.service
+  - src: packaging/config.yaml
+    dst: /etc/ethereum-node/config.yaml
+    type: config|noreplace
+scripts:
+  postinstall: packaging/postinstall.sh
+  preremove: packaging/preremove.sh
