@@ -10,6 +10,7 @@ three external review rounds enforce that every claim is verified.
 ```sh
 go build -o bin/ethereum-node ./cmd/ethereum-node   # the binary
 go vet ./...
+scripts/check-pair.sh   # geth/prysm pair invariants + versions.lock (CI runs it)
 scripts/devnet-up.sh [delay-secs]    # full devnet: node+validator+spam+grafana
 scripts/devnet-up.sh down            # verified stop of everything
 NO_OBSERVABILITY=1 WAIT_FOR_BLOCKS=1 scripts/devnet-up.sh 20   # CI mode

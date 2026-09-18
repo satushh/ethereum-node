@@ -394,8 +394,10 @@ implemented with first A/B numbers on the `isolation-ab` branch, and item 3's
 first rung (`--engine-transport=inproc`) merged into main, measured against
 the injection-seam PR that is now merged upstream
 ([prysm#17334](https://github.com/OffchainLabs/prysm/pull/17334), 2026-09-09;
-numbers under Upstream PRs) and contained in the pinned prysm. Next: item 2
-(release pipeline).
+numbers under Upstream PRs) and contained in the pinned prysm. Item 2 is
+started: `versions.lock` records tested pairs and `scripts/check-pair.sh`
+enforces the pair invariants in CI; reproducible builds, signed artifacts,
+`.deb` + systemd, and the `doctor` endpoint remain.
 
 1. **Network presets + one config file** — done (see above).
 2. **Release pairing + packaging** — versions.lock of tested (geth, prysm)
@@ -403,7 +405,10 @@ numbers under Upstream PRs) and contained in the pinned prysm. Next: item 2
    work), published binaries + images with a signing story for the combined
    artifact, `.deb` + systemd, a `doctor` endpoint. Buys
    `apt install ethereum-node` — and it is the prerequisite for announcing
-   anything wider.
+   anything wider. *Started:* `versions.lock` (tested pairs) and the CI pair
+   check (`scripts/check-pair.sh`) are in. Packaging decision: a self-hosted
+   apt repository (prebuilt signed `.deb`s serve Debian and Ubuntu, and users
+   run the exact tested binary); a Launchpad PPA can layer on later.
 3. **Engine transport ladder** — `rpc.DialInProc` (no socket, same JSON),
    then a typed `EngineCaller` on `catalyst.ConsensusAPI` (no JSON). The
    serialized path stays as compatibility boundary and differential-test
@@ -498,8 +503,11 @@ observations):
 
 ## Version bump checklist
 
-What to check when a new prysm or geth release lands (this is what the
-release-pairing CI of item 2 automates):
+What to check when a new prysm or geth release lands. Step 1's alignment is
+enforced mechanically now (`scripts/check-pair.sh`, run in CI along with a
+devnet smoke to first blocks); the re-diff, the finality/Hoodi smokes, and
+the dashboard re-validation remain manual until item 2's release-pairing CI
+is complete:
 
 **Bumping prysm** (`go.mod` require → new tag):
 

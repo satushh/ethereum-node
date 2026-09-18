@@ -17,6 +17,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Pair check (geth = prysm's requirement; replaces; versions.lock)
+        run: scripts/check-pair.sh
+
       - name: Vet
         run: go vet ./...
 

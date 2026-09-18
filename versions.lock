@@ -1,0 +1,10 @@
+# versions.lock — tested (geth, prysm) pairs for the combined binary.
+# Newest first; the top entry must match what go.mod pins, and CI enforces
+# that plus the pair invariants via scripts/check-pair.sh. Append an entry
+# when a pair passes the version-bump checklist's smokes (README).
+
+- prysm: v7.1.9-0.20260917223212-011d0135a5ae   # develop@011d013, first pin containing merged #17334
+  geth: v1.17.4
+  go: 1.26.5
+  tested: 2026-09-18
+  evidence: devnet to finality on both engine transports (ipc and inproc; inproc socketlessness fd-verified); verified teardown
