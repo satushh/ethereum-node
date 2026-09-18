@@ -357,7 +357,7 @@ func versionCommand() *cli.Command {
 			fmt.Printf("ethereum-node %s\n", bundleVersion)
 			fmt.Printf("  geth:    v%d.%d.%d-%s\n", gethversion.Major, gethversion.Minor, gethversion.Patch, gethversion.Meta)
 			fmt.Printf("  prysm:   %s\n", prysmModuleVersion())
-			fmt.Printf("  runtime: single process, engine API over private IPC\n")
+			fmt.Printf("  runtime: single process; engine API over in-datadir IPC or in-process (--engine-transport)\n")
 			return nil
 		},
 	}
