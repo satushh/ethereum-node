@@ -6,7 +6,9 @@
 // Before hook and the node startup are kept identical to upstream so the
 // embedded beacon node behaves exactly like the standalone binary; the only
 // deviations are that Run accepts a caller-provided context and argument
-// vector, and startup errors are returned instead of calling log.Fatal.
+// vector plus optional execution-service options (how the supervisor injects
+// the in-process engine transport), and startup errors are returned instead
+// of calling log.Fatal.
 package prysmapp
 
 import (
@@ -19,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/builder"
+	beaconexecution "github.com/OffchainLabs/prysm/v7/beacon-chain/execution"
 	"github.com/OffchainLabs/prysm/v7/beacon-chain/node"
 	"github.com/OffchainLabs/prysm/v7/cmd"
 	blockchaincmd "github.com/OffchainLabs/prysm/v7/cmd/beacon-chain/blockchain"
@@ -318,14 +321,14 @@ func KnownFlags() map[string]bool {
 // program name, mirroring os.Args). It blocks until the node shuts down,
 // either because the process received SIGINT/SIGTERM (Prysm installs its own
 // handler in node.Start) or because startup failed.
-func Run(rctx context.Context, args []string) error {
+func Run(rctx context.Context, args []string, execOpts ...beaconexecution.Option) error {
 	rctx, cancel := context.WithCancel(rctx)
 	defer cancel()
 	app := cli.App{
 		Name:  "beacon-chain",
 		Usage: "this is a beacon chain implementation for Ethereum, embedded in ethereum-node",
 		Action: func(ctx *cli.Context) error {
-			if err := startNode(ctx, cancel); err != nil {
+			if err := startNode(ctx, cancel, execOpts...); err != nil {
 				log.Error(err.Error())
 				return err
 			}
@@ -345,7 +348,7 @@ func Run(rctx context.Context, args []string) error {
 	return app.RunContext(rctx, args)
 }
 
-func startNode(ctx *cli.Context, cancel context.CancelFunc) error {
+func startNode(ctx *cli.Context, cancel context.CancelFunc, execOpts ...beaconexecution.Option) error {
 	// Fix data dir for Windows users.
 	outdatedDataDir := filepath.Join(file.HomeDir(), "AppData", "Roaming", "Eth2")
 	currentDataDir := ctx.String(cmd.DataDirFlag.Name)
@@ -386,6 +389,7 @@ func startNode(ctx *cli.Context, cancel context.CancelFunc) error {
 	if err != nil {
 		return err
 	}
+	executionFlagOpts = append(executionFlagOpts, execOpts...)
 	builderFlagOpts, err := builder.FlagOptions(ctx)
 	if err != nil {
 		return err

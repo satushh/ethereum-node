@@ -28,6 +28,7 @@ type fileConfig struct {
 	Node struct {
 		Datadir           string `yaml:"datadir"`
 		Network           string `yaml:"network"`
+		EngineTransport   string `yaml:"engine-transport"`
 		Verbosity         string `yaml:"verbosity"`
 		Metrics           *bool  `yaml:"metrics"`
 		FeeRecipient      string `yaml:"fee-recipient"`
@@ -79,17 +80,18 @@ func applyFileConfig(c *cli.Context, path string) (*fileExtras, error) {
 		return c.Set(flagName, value)
 	}
 	for flagName, value := range map[string]string{
-		datadirFlag.Name:        fc.Node.Datadir,
-		elDatadirFlag.Name:      fc.Execution.Datadir,
-		clDatadirFlag.Name:      fc.Consensus.Datadir,
-		networkFlag.Name:        fc.Node.Network,
-		verbosityFlag.Name:      fc.Node.Verbosity,
-		feeRecipientFlag.Name:   fc.Node.FeeRecipient,
-		checkpointURLFlag.Name:  fc.Node.CheckpointSyncURL,
-		p2pListenFlag.Name:      fc.Execution.P2PListen,
-		elGenesisFlag.Name:      fc.Execution.Genesis,
-		clGenesisStateFlag.Name: fc.Consensus.GenesisState,
-		clChainConfigFlag.Name:  fc.Consensus.ChainConfig,
+		datadirFlag.Name:         fc.Node.Datadir,
+		elDatadirFlag.Name:       fc.Execution.Datadir,
+		clDatadirFlag.Name:       fc.Consensus.Datadir,
+		networkFlag.Name:         fc.Node.Network,
+		engineTransportFlag.Name: fc.Node.EngineTransport,
+		verbosityFlag.Name:       fc.Node.Verbosity,
+		feeRecipientFlag.Name:    fc.Node.FeeRecipient,
+		checkpointURLFlag.Name:   fc.Node.CheckpointSyncURL,
+		p2pListenFlag.Name:       fc.Execution.P2PListen,
+		elGenesisFlag.Name:       fc.Execution.Genesis,
+		clGenesisStateFlag.Name:  fc.Consensus.GenesisState,
+		clChainConfigFlag.Name:   fc.Consensus.ChainConfig,
 	} {
 		if err := set(flagName, value); err != nil {
 			return nil, err

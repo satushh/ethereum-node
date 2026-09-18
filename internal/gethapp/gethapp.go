@@ -23,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/version"
 	"github.com/naoina/toml"
 )
@@ -193,6 +194,14 @@ func Start(cfg Config) (*Node, error) {
 // the engine API.
 func (n *Node) IPCEndpoint() string {
 	return n.stack.IPCEndpoint()
+}
+
+// Attach returns a fresh RPC client wired directly to the node's in-process
+// API handler (rpc.DialInProc): every registered namespace including the
+// engine API, no socket or HTTP in between. Each call returns a new client;
+// the caller owns it and must Close it.
+func (n *Node) Attach() *rpc.Client {
+	return n.stack.Attach()
 }
 
 // HTTPEndpoint returns the user JSON-RPC endpoint, or "" if HTTP is disabled.

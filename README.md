@@ -390,12 +390,12 @@ separately — one root-owned registry is roadmap item 4.
 
 **Status:** item 1 shipped (network presets verified on Hoodi + the single
 config file), devnet observability shipped, item 8 (`--isolation=process`)
-implemented with first A/B numbers on the `isolation-ab` branch. The
-injection-seam PR is merged upstream
-([prysm#17334](https://github.com/OffchainLabs/prysm/pull/17334), 2026-09-09)
-and the pinned prysm now contains it, so item 3 is unblocked; its first rung
-is implemented and measured on the `engine-inproc-ab` branch, ready to fold
-into main. Next: item 2 (release pipeline).
+implemented with first A/B numbers on the `isolation-ab` branch, and item 3's
+first rung (`--engine-transport=inproc`) merged into main, measured against
+the injection-seam PR that is now merged upstream
+([prysm#17334](https://github.com/OffchainLabs/prysm/pull/17334), 2026-09-09;
+numbers under Upstream PRs) and contained in the pinned prysm. Next: item 2
+(release pipeline).
 
 1. **Network presets + one config file** — done (see above).
 2. **Release pairing + packaging** — versions.lock of tested (geth, prysm)
@@ -407,9 +407,11 @@ into main. Next: item 2 (release pipeline).
 3. **Engine transport ladder** — `rpc.DialInProc` (no socket, same JSON),
    then a typed `EngineCaller` on `catalyst.ConsensusAPI` (no JSON). The
    serialized path stays as compatibility boundary and differential-test
-   oracle. Buys proposal-path latency and allocation churn. The seam it
-   needs is merged upstream (prysm#17334, `execution.WithRPCClientDialer`);
-   the first rung is implemented on the `engine-inproc-ab` branch.
+   oracle. Buys proposal-path latency and allocation churn. The seam is
+   merged upstream (prysm#17334, `execution.WithRPCClientDialer`) and the
+   first rung is merged into main (`--engine-transport=inproc`); the
+   measured residual — JSON codec + rpc dispatch, 0.5–1.7 ms per call — is
+   what the typed rung removes.
 4. **Root-owned process globals** — one logging setup, one OTel provider, one
    Prometheus registry/endpoint, one pprof. Today the modules can fight over
    globals (Prysm's trace-verbosity path overwrites the geth log handler).
@@ -446,7 +448,29 @@ observations):
    engine transports (roadmap 3) without patches. **Merged:
    [prysm#17334](https://github.com/OffchainLabs/prysm/pull/17334)**
    (`execution.WithRPCClientDialer`, 2026-09-09); contained in the pinned
-   prysm as of develop @ `011d013`.
+   prysm as of develop @ `011d013`, and validated end-to-end here first:
+   the supervisor hands Prysm a dialer returning geth's `stack.Attach()`
+   in-process client (`--engine-transport=inproc`, now in main), and a
+   devnet A/B — same binary, same 30 tx/s spam, 90 spam-filled
+   slots per leg, only the transport flag flipped, socketlessness verified at
+   the fd level — measured these client-observed means:
+
+   | engine call | ipc socket | in-proc | delta |
+   |---|---|---|---|
+   | `engine_getPayload` | 3.03 ms | 2.28 ms | −25% |
+   | `engine_forkchoiceUpdated` | 1.32 ms | 1.15 ms | −13% |
+   | `engine_newPayload` | 4.58 ms | 4.51 ms | −1.5% |
+
+   p50/p90/p99 moved the same direction on every method, and geth's
+   server-side medians were identical across the legs (±0.03 ms), so the
+   deltas are transport, not chain noise; whole-process CPU over the window
+   ran ~7% lower in-proc (one run — indicative, not proven). The residual
+   client−server gap (~0.5 ms forkchoiceUpdated, ~1.1 ms newPayload,
+   ~1.7 ms getPayload) is JSON codec + dispatch: unreachable by transport
+   swaps, 2–5× what the socket cost, and exactly the typed-`EngineCaller`
+   rung's target. Devnet payloads are small (~360 transfers per block);
+   both the saving and the residual grow with payload size on public
+   networks.
 2. **Importable app wiring** (`beaconapp`-style package with a thin
    `cmd/beacon-chain` shim) — deletes this repo's one copied file and makes
    the composition pure.

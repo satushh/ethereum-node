@@ -9,6 +9,7 @@
 # Env: NO_SPAM=1            skip the tx spammer
 #      NO_OBSERVABILITY=1   skip prometheus/grafana
 #      WAIT_FOR_BLOCKS=1    block until the chain actually produces (CI mode)
+#      ENGINE_TRANSPORT=inproc   in-process engine transport (default: ipc socket)
 #
 # Lifecycle: every launched process is tracked by pid file under run/, `down`
 # signals exactly those pids (TERM, wait, KILL), and startup gates on real
@@ -157,10 +158,11 @@ cleanup_on_failure() {
 }
 trap cleanup_on_failure EXIT
 
-echo ">> starting ethereum-node (geth + prysm beacon, one process; config: configs/devnet.yaml)"
+echo ">> starting ethereum-node (geth + prysm beacon, one process; config: configs/devnet.yaml; engine transport: ${ENGINE_TRANSPORT:-ipc})"
 # absolute paths for every long-running process: identity checks and
 # fallback patterns match on "$PWD/bin/..."
-"$PWD/bin/ethereum-node" run --config configs/devnet.yaml > run/logs/node.log 2>&1 &
+"$PWD/bin/ethereum-node" run --config configs/devnet.yaml \
+    ${ENGINE_TRANSPORT:+--engine-transport="${ENGINE_TRANSPORT}"} > run/logs/node.log 2>&1 &
 echo $! > run/node.pid
 echo "   pid $(cat run/node.pid) (logs: run/logs/node.log)"
 
