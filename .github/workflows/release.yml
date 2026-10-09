@@ -39,9 +39,13 @@ jobs:
         run: scripts/check-pair.sh
 
       - name: Build
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           mkdir -p dist
-          go build -trimpath -o dist/ethereum-node ./cmd/ethereum-node
+          LDX=""
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then LDX="-X main.bundleVersion=${TAG}"; fi
+          go build -trimpath -ldflags "${LDX}" -o dist/ethereum-node ./cmd/ethereum-node
           dist/ethereum-node version
 
       - name: Package .deb
