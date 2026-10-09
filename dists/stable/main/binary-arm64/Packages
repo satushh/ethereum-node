@@ -1,0 +1,18 @@
+Package: ethereum-node
+Version: 0.1.0
+Architecture: arm64
+Maintainer: satushh <sdas@offchainlabs.com>
+Installed-Size: 106831
+Depends: libc6
+Filename: pool/ethereum-node_0.1.0_arm64.deb
+Size: 51803886
+MD5sum: ea0e29bd566386f91fee5fb2f3a9d70c
+SHA1: ffd2fa449f36f7cf7129e22e73aeb10b95559e59
+SHA256: a2b795110294042a1a24138e93fe9e50c349edbfd5131c37406850629bbe3747
+Section: net
+Priority: optional
+Homepage: https://github.com/satushh/ethereum-node
+Description: Geth (execution) and Prysm (beacon) as one binary and one process.
+ Unmodified upstream clients joined by the standard Engine API;
+ `ethereum-node version` reports the exact tested (geth, prysm) pair.
+

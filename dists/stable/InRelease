@@ -1,0 +1,41 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA256
+
+Architectures: amd64 arm64
+Codename: stable
+Components: main
+Date: Fri, 09 Oct 2026 09:35:41 +0000
+Label: ethereum-node
+Origin: ethereum-node
+Suite: stable
+MD5Sum:
+ 0fdb1455eab0482eb93167e0df6fef57              156 Release
+ 1781444b81fec8adbd09609c068bbc78              659 main/binary-amd64/Packages
+ c1aeea30663baf6f1c54b30609ed0b22              477 main/binary-amd64/Packages.gz
+ 5713a6c7ccd8bd031c7584e9cbbeb664              659 main/binary-arm64/Packages
+ 76fed3fc98c9a8248237b629746debcb              478 main/binary-arm64/Packages.gz
+SHA1:
+ b04db932694a337f92d1af7d83c9ec759598cf22              156 Release
+ 626eb88a9f961c11bf9cdca183dd8e4fdbbe0037              659 main/binary-amd64/Packages
+ 974e8f0b1b115f203a4e17b8615d1ca0a42bb417              477 main/binary-amd64/Packages.gz
+ 2b94c3ed73d214d8736428b7b53e616b8a9f3095              659 main/binary-arm64/Packages
+ fe53947e1c50a951539e0331f2cc4a9e3f3d04d3              478 main/binary-arm64/Packages.gz
+SHA256:
+ d0a9e21bc02d54c7ac106fbcfb59ec04da5fead530ac840fdc14231b1bd632d7              156 Release
+ c09bf1039abe4e657ee6455a5610fc51e5fb0b2412bd18bdb4f870dfbf40d68b              659 main/binary-amd64/Packages
+ bce0b53bfa0c0b563e3806804f0573f6cd3bf9842ba1ff390fe97527e159f6f8              477 main/binary-amd64/Packages.gz
+ 58949c9ab7b05da449621a482c187aa1a84a1d09ac2c256ed02eda576d71fddb              659 main/binary-arm64/Packages
+ 15574dbd67e3a6cd5adb5a0a238fa312a647f06a39177553fa17a5a0db859272              478 main/binary-arm64/Packages.gz
+SHA512:
+ bfd6ef46e1f2339af32fbd34a4b16d92d7865f06cc7cc39e99bfe5d32a08aec6795b5b2b9b20291e0096f17ca63dd3e0112169183ab70413cd9335ddc6e44b5c              156 Release
+ da1303ed500736ea92411b6de036bf8ce1b2193a1a4baa87db9ff650c1cc09ba2db79ad098e0ab064e172b7a046e63c47bf302a6feafe88ce561ef9467a2ef08              659 main/binary-amd64/Packages
+ 8fdf2857d5a157e0f0e1d45b684f6615f23facd3f0ff78fd3ed0eba325daccd5e5bdbe6134d53c39a0ab3b29b43b7928a47eb0e9669d6062501da0bbf3094c63              477 main/binary-amd64/Packages.gz
+ b46c13dd9a2139b1d74be5f3b7432e0902271034cdea7c693a96636860326d4b4610f6b1797667a1fa65e691e97ff6cbbe2a1cd743dd67b73fe81982472c974c              659 main/binary-arm64/Packages
+ 8b06e5de1a55a90e4977210cafeb0b071fb1adab3f3b44e0e001ebc5b568dc35676f9f85eb592f7b4cb970b53f07496ad911bba047a961ae6e72e62e12ba5b4a              478 main/binary-arm64/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iHUEARYIAB0WIQR8vMfErQTp3/Tl40dvtlZjiO3DNAUCasi1bQAKCRBvtlZjiO3D
+NHAaAQDhwGHYmJ/x5yIYqA3G9E/JiZJOHIuuXKRBDj3FhjKPfwD/RIC/1nsvtk6h
+j0gTUxYx6KFSATBG1OAkeq3ga1pVQwg=
+=kQpf
+-----END PGP SIGNATURE-----
