@@ -35,7 +35,7 @@ import (
 
 // bundleVersion is overridden on tag builds by the release workflow via
 // -ldflags "-X main.bundleVersion=vX.Y.Z"; plain `go build` keeps the -dev value.
-var bundleVersion = "v0.1.0-dev"
+var bundleVersion = "v0.2.0-dev"
 
 // prysmModuleVersion reports the prysm version actually linked in, from the
 // binary's embedded build info. (Prysm's own runtime/version prints
