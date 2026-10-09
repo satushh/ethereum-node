@@ -13,7 +13,7 @@ unit (`ethereum-node.service`, running as the `ethereum-node` system user
 with the datadir in `/var/lib/ethereum-node`), and a conffile
 `/etc/ethereum-node/config.yaml` that ships pointing at the Hoodi testnet.
 
-## End-user install (once the repo is published)
+## End-user install
 
 ```sh
 curl -fsSL https://satushh.github.io/ethereum-node/key.gpg \
@@ -27,6 +27,11 @@ sudo systemctl enable --now ethereum-node
 ```
 
 ## One-time setup (before the first tag)
+
+Done 2026-10-09 for v0.1.0: signing key
+`7CBCC7C4AD04E9DFF4E5E3476FB6566388EDC334` (in the release laptop's gpg
+keyring, no passphrase), repo secret `APT_SIGNING_KEY`, Pages serving
+`gh-pages` root. Redo these steps only on key rotation.
 
 1. **Signing key** (keep the private key offline; rotate = redo this):
 

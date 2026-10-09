@@ -395,10 +395,11 @@ first rung (`--engine-transport=inproc`) merged into main, measured against
 the injection-seam PR that is now merged upstream
 ([prysm#17334](https://github.com/OffchainLabs/prysm/pull/17334), 2026-09-09;
 numbers under Upstream PRs) and contained in the pinned prysm. Item 2 is
-started: `versions.lock` + the CI pair check are in, and the `.deb` +
-signed-apt-repo release workflow is built and container-tested (first
-publish pending the one-time setup in `packaging/README.md`); reproducible
-builds, container images, and the `doctor` endpoint remain.
+mostly in: `versions.lock` + the CI pair check, and the release pipeline is
+live: v0.1.0 is published as a signed apt repository on GitHub Pages plus a
+GitHub Release, with the end-user `apt install` path verified from a clean
+Debian container against the live repo; reproducible builds, container
+images, and the `doctor` endpoint remain.
 
 1. **Network presets + one config file** — done (see above).
 2. **Release pairing + packaging** — versions.lock of tested (geth, prysm)
@@ -413,9 +414,10 @@ builds, container images, and the `doctor` endpoint remain.
    `.deb` itself (systemd unit, `ethereum-node` system user, Hoodi-default
    conffile) and the tag-triggered workflow that signs and publishes the apt
    repo to `gh-pages` are in (`packaging/`,
-   `.github/workflows/release.yml`), install-tested in a clean Debian
-   container; the first real publish needs the one-time setup in
-   `packaging/README.md` (signing-key secret, Pages) and a tag.
+   `.github/workflows/release.yml`); first published 2026-10-09 as v0.1.0
+   (one-time setup done: `APT_SIGNING_KEY` secret + Pages serving
+   `gh-pages`), with the end-user install verified end to end from a clean
+   Debian container against the live repo.
 3. **Engine transport ladder** — `rpc.DialInProc` (no socket, same JSON),
    then a typed `EngineCaller` on `catalyst.ConsensusAPI` (no JSON). The
    serialized path stays as compatibility boundary and differential-test
