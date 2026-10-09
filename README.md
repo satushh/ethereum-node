@@ -41,6 +41,30 @@ scripts/testnet-up.sh hoodi        # equivalently:
 ./bin/ethereum-node run --config configs/hoodi.yaml
 ```
 
+## Install from the apt repository (Debian/Ubuntu)
+
+No toolchain needed: prebuilt, signed `.deb`s (amd64/arm64) of the exact
+tested pair, published by `.github/workflows/release.yml` on every tag.
+
+```sh
+# one-time: trust the signing key, add the repo
+curl -fsSL https://satushh.github.io/ethereum-node/key.gpg \
+  | sudo tee /usr/share/keyrings/ethereum-node.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/ethereum-node.gpg] https://satushh.github.io/ethereum-node stable main" \
+  | sudo tee /etc/apt/sources.list.d/ethereum-node.list
+
+sudo apt update && sudo apt install ethereum-node
+
+# review /etc/ethereum-node/config.yaml (ships following Hoodi), then
+sudo systemctl enable --now ethereum-node
+journalctl -u ethereum-node -f
+```
+
+Upgrades ride `apt upgrade`. The package is the public-network follower
+story; the devnet harness above (validator, spammer, dashboards) still
+needs the repo checkout. Packaging that as `ethereum-node --network=local`
+is on the roadmap (item 2). Details: `packaging/README.md`.
+
 ## Architecture
 
 ```
@@ -399,7 +423,8 @@ mostly in: `versions.lock` + the CI pair check, and the release pipeline is
 live: v0.1.0 is published as a signed apt repository on GitHub Pages plus a
 GitHub Release, with the end-user `apt install` path verified from a clean
 Debian container against the live repo; reproducible builds, container
-images, and the `doctor` endpoint remain.
+images, the `doctor` endpoint, and a one-command local devnet from the
+installed package remain.
 
 1. **Network presets + one config file** — done (see above).
 2. **Release pairing + packaging** — versions.lock of tested (geth, prysm)
@@ -417,7 +442,13 @@ images, and the `doctor` endpoint remain.
    `.github/workflows/release.yml`); first published 2026-10-09 as v0.1.0
    (one-time setup done: `APT_SIGNING_KEY` secret + Pages serving
    `gh-pages`), with the end-user install verified end to end from a clean
-   Debian container against the live repo.
+   Debian container against the live repo. Still to do here: reproducible
+   builds, container images, the `doctor` endpoint, and a one-command
+   local devnet from the installed package (`ethereum-node
+   --network=local`: bake genesis generation + an interop validator into
+   the run path, which `scripts/devnet-up.sh` does externally today; an
+   optional observability flag would drive a bundled docker compose, since
+   Grafana is its own server and cannot live inside the binary).
 3. **Engine transport ladder** — `rpc.DialInProc` (no socket, same JSON),
    then a typed `EngineCaller` on `catalyst.ConsensusAPI` (no JSON). The
    serialized path stays as compatibility boundary and differential-test
