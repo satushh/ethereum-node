@@ -26,6 +26,13 @@ sudo apt update && sudo apt install ethereum-node
 sudo systemctl enable --now ethereum-node
 ```
 
+The installed binary also runs a self-contained local devnet with
+dashboards (no checkout, no toolchain; docker optional for Grafana):
+
+```sh
+ethereum-node devnet    # Ctrl-C stops node, validators, spam, containers
+```
+
 ## One-time setup (before the first tag)
 
 Done 2026-10-09 for v0.1.0: signing key

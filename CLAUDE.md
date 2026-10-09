@@ -11,6 +11,7 @@ three external review rounds enforce that every claim is verified.
 go build -o bin/ethereum-node ./cmd/ethereum-node   # the binary
 go vet ./...
 scripts/check-pair.sh   # geth/prysm pair invariants + versions.lock (CI runs it)
+bin/ethereum-node devnet             # one-command devnet from the binary alone
 scripts/devnet-up.sh [delay-secs]    # full devnet: node+validator+spam+grafana
 scripts/devnet-up.sh down            # verified stop of everything
 NO_OBSERVABILITY=1 WAIT_FOR_BLOCKS=1 scripts/devnet-up.sh 20   # CI mode
@@ -23,9 +24,10 @@ asserts verified teardown — keep it green.
 ## Invariants (violating these is always a bug)
 
 - **Never patch the upstream clients.** Both are pinned module versions from
-  the proxy. The single exception is `internal/prysmapp/prysmapp.go`, a
-  deliberate near-verbatim copy of prysm's `cmd/beacon-chain/main.go`
-  (upstream is `package main`) — keep it byte-close and re-diff on every bump.
+  the proxy. The only exceptions are `internal/prysmapp/prysmapp.go` and
+  `internal/valapp/valapp.go`: deliberate near-verbatim copies of prysm's
+  `cmd/beacon-chain/main.go` and `cmd/validator/main.go` (upstream is
+  `package main`); keep them byte-close and re-diff both on every bump.
 - **The linked go-ethereum version must be exactly what prysm's go.mod
   requires.** Prysm moves; geth follows.
 - **Mirror prysm's go.mod replace directives** in ours (Go ignores replaces
@@ -44,13 +46,19 @@ asserts verified teardown — keep it green.
 
 ## Map
 
-- `cmd/ethereum-node/` — supervisor CLI, config file (`config.go`), wallet
+- `cmd/ethereum-node/` — supervisor CLI, config file (`config.go`), wallet,
+  devnet orchestrator (`devnet.go`: in-binary genesis, validator re-exec,
+  embedded observability)
 - `internal/gethapp/` — geth embedded as a library (config structs in)
-- `internal/prysmapp/` — prysm's CLI made importable (synthesized argv in)
+- `internal/prysmapp/` — prysm's beacon CLI made importable (synthesized argv)
+- `internal/valapp/` — prysm's validator CLI made importable (same pattern)
+- `internal/devnetspam/` — tx spammer library (cmd/devnet-spam is its CLI)
 - `configs/` — node config files; `devnet/chain-config.yml` — beacon chain
-  params (a different layer than `configs/devnet.yaml`)
+  params (a different layer than `configs/devnet.yaml`), embedded via
+  `devnet/embed.go`
 - `observability/` — prometheus + grafana compose; dashboards are validated
-  against live exporter metric names (they drift across releases)
+  against live exporter metric names (they drift across releases); embedded
+  via `observability/embed.go` so `devnet` materializes it at runtime
 - `packaging/` — nfpm `.deb` spec + systemd unit; `release.yml` signs and
   publishes the apt repo to `gh-pages` on tag push (setup: packaging/README.md)
 - Branch `isolation-ab` — `--isolation=process` + the A/B benchmark harness

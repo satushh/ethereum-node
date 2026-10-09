@@ -33,6 +33,10 @@ from genesis-funded dev accounts; `NO_SPAM=1` disables); finalization at ~13
 minutes. Stop everything with `scripts/devnet-up.sh down`. Laptop note:
 system sleep freezes the devnet — keep the machine awake (`caffeinate -is`).
 
+The same devnet, from the installed package with no checkout or toolchain:
+`ethereum-node devnet` (one command, Ctrl-C stops everything; apt install
+below).
+
 Or join a public testnet (checkpoint sync puts the beacon at head in minutes;
 geth's snap sync then needs hours and ~100 GB):
 
@@ -60,10 +64,11 @@ sudo systemctl enable --now ethereum-node
 journalctl -u ethereum-node -f
 ```
 
-Upgrades ride `apt upgrade`. The package is the public-network follower
-story; the devnet harness above (validator, spammer, dashboards) still
-needs the repo checkout. Packaging that as `ethereum-node --network=local`
-is on the roadmap (item 2). Details: `packaging/README.md`.
+Upgrades ride `apt upgrade`. The package also carries the full local
+devnet: `ethereum-node devnet` boots the node, 64 interop validators, a tx
+spammer, and (when docker is present) the Grafana dashboards at
+`http://127.0.0.1:3001`, from one command; Ctrl-C tears all of it down.
+Details: `packaging/README.md`.
 
 ## Architecture
 
@@ -127,21 +132,22 @@ CL genesis state; chain ID checked via `eth_chainId` on connect) —
 `ethereum-node testnet generate-genesis` (prysmctl's generator, mounted
 unchanged) emits a matching pair by construction.
 
-The entire integration (~1,850 lines; ~1,150 hand-written once the copied
-file and the mostly-generated go.mod are excluded):
+The entire integration (~2,900 lines; ~1,950 hand-written once the two
+copied files and the mostly-generated go.mod are excluded):
 
 | Piece | Lines | Nature |
 |---|---|---|
-| `internal/prysmapp/prysmapp.go` | ~410 | near-verbatim copy of prysm's `main.go` (upstream is `package main`) |
+| `internal/prysmapp/prysmapp.go` | ~410 | near-verbatim copy of prysm's beacon `main.go` (upstream is `package main`) |
+| `internal/valapp/valapp.go` | ~290 | near-verbatim copy of prysm's validator `main.go` (same reason; `devnet` re-execs it) |
 | `internal/gethapp/gethapp.go` | ~290 | thin wrapper over geth's public embedding API |
-| `cmd/ethereum-node/` | ~540 | supervisor CLI, config file, devnet wallet |
-| `cmd/devnet-spam/` + `devnet/` + `scripts/` | ~340 | devnet fixtures and tooling |
+| `cmd/ethereum-node/` | ~1,050 | supervisor CLI, config file, devnet orchestrator, wallet |
+| `cmd/devnet-spam/` + `internal/devnetspam/` + `devnet/` + `scripts/` | ~590 | devnet fixtures and tooling |
 | `go.mod` | ~270 | pinned versions + 1 replace mirrored from prysm's go.mod |
 
 The upstream changes that would help most are small and listed in
 [Upstream PRs to propose](#upstream-prs-to-propose) — chief among them Prysm
-exporting its app wiring as an importable package, which deletes the copied
-file and makes this pure composition.
+exporting its beacon and validator app wiring as importable packages, which
+deletes both copied files and makes this pure composition.
 
 ## How a slot flows through the process
 
@@ -254,8 +260,11 @@ interop keys), `version` (reports both bundled versions).
 
 ## The devnet, flag by flag
 
-`scripts/devnet-up.sh` does all of this (plus tx spam and dashboards); spelled
-out, with each flag representing one kind of knob:
+`ethereum-node devnet` does all of this in one command (genesis, node,
+validators, spam, dashboards; works from the installed package, no
+checkout). `scripts/devnet-up.sh` is the repo-side equivalent with separate
+processes per piece. Spelled out, with each flag representing one kind of
+knob:
 
 ```sh
 go build -o bin/ethereum-node ./cmd/ethereum-node
@@ -422,9 +431,9 @@ numbers under Upstream PRs) and contained in the pinned prysm. Item 2 is
 mostly in: `versions.lock` + the CI pair check, and the release pipeline is
 live: v0.1.0 is published as a signed apt repository on GitHub Pages plus a
 GitHub Release, with the end-user `apt install` path verified from a clean
-Debian container against the live repo; reproducible builds, container
-images, the `doctor` endpoint, and a one-command local devnet from the
-installed package remain.
+Debian container against the live repo, and `ethereum-node devnet` gives
+the installed package a one-command local devnet with dashboards;
+reproducible builds, container images, and the `doctor` endpoint remain.
 
 1. **Network presets + one config file** — done (see above).
 2. **Release pairing + packaging** — versions.lock of tested (geth, prysm)
@@ -442,13 +451,15 @@ installed package remain.
    `.github/workflows/release.yml`); first published 2026-10-09 as v0.1.0
    (one-time setup done: `APT_SIGNING_KEY` secret + Pages serving
    `gh-pages`), with the end-user install verified end to end from a clean
-   Debian container against the live repo. Still to do here: reproducible
-   builds, container images, the `doctor` endpoint, and a one-command
-   local devnet from the installed package (`ethereum-node
-   --network=local`: bake genesis generation + an interop validator into
-   the run path, which `scripts/devnet-up.sh` does externally today; an
-   optional observability flag would drive a bundled docker compose, since
-   Grafana is its own server and cannot live inside the binary).
+   Debian container against the live repo. `ethereum-node devnet` is the
+   one-command local devnet from the installed package: embedded chain
+   config + two-pass genesis + wallet in-binary, the validator client
+   re-exec'd from the same binary (`internal/valapp`, the prysmapp pattern
+   applied to prysm's validator `main.go`), the spammer in-process, and
+   the observability compose stack embedded and materialized at runtime
+   (`--observability=auto|on|off`; Grafana is its own server, so docker
+   drives it). Still to do: reproducible builds, container images, the
+   `doctor` endpoint.
 3. **Engine transport ladder** — `rpc.DialInProc` (no socket, same JSON),
    then a typed `EngineCaller` on `catalyst.ConsensusAPI` (no JSON). The
    serialized path stays as compatibility boundary and differential-test
@@ -517,7 +528,8 @@ observations):
    both the saving and the residual grow with payload size on public
    networks.
 2. **Importable app wiring** (`beaconapp`-style package with a thin
-   `cmd/beacon-chain` shim) — deletes this repo's one copied file and makes
+   `cmd/beacon-chain` shim, and the same for `cmd/validator`) — deletes
+   this repo's two copied files and makes
    the composition pure.
 3. **Attach the error to the genesis-provider failure log**
    (`genesis/initialize.go`) — **resolved upstream**: as of develop @
@@ -556,9 +568,10 @@ is complete:
    replaces in dependencies — currently only the json-iterator fork; prysm's
    vendored go-bip39 is functionally identical to upstream v1.1.0 so it isn't
    mirrored); the `go` toolchain directive.
-2. Re-diff `internal/prysmapp/prysmapp.go` against upstream
-   `cmd/beacon-chain/main.go` — the one deliberate copy; this also picks up
-   new flags. Usual drift: the flag list, the Before hook, `node.New`'s
+2. Re-diff the two deliberate copies against upstream:
+   `internal/prysmapp/prysmapp.go` vs `cmd/beacon-chain/main.go` and
+   `internal/valapp/valapp.go` vs `cmd/validator/main.go`; this also picks
+   up new flags. Usual drift: the flag list, the Before hook, `node.New`'s
    signature.
 3. `go mod tidy && go build` — the compiler is the cheap alarm.
 
