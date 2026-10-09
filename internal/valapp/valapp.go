@@ -1,0 +1,291 @@
+// Package valapp embeds the Prysm validator client as an importable module,
+// used by `ethereum-node devnet` to run interop validators from the same
+// binary (as a re-exec'd child process, keeping the process topology of a
+// standalone validator).
+//
+// It is an importable adaptation of prysm/cmd/validator/main.go (which is
+// package main and therefore cannot be linked directly), the same pattern as
+// internal/prysmapp. The flag list, the Before hook and the node startup are
+// kept identical to upstream so the embedded validator behaves exactly like
+// the standalone binary; the only deviations are that Run accepts a
+// caller-provided context and argument vector, errors are returned instead of
+// calling log.Fatal, and upstream's help template + panic re-log wrapper are
+// omitted. Re-diff against upstream on every prysm bump.
+package valapp
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/OffchainLabs/prysm/v7/cmd"
+	accountcommands "github.com/OffchainLabs/prysm/v7/cmd/validator/accounts"
+	dbcommands "github.com/OffchainLabs/prysm/v7/cmd/validator/db"
+	"github.com/OffchainLabs/prysm/v7/cmd/validator/flags"
+	slashingprotectioncommands "github.com/OffchainLabs/prysm/v7/cmd/validator/slashing-protection"
+	walletcommands "github.com/OffchainLabs/prysm/v7/cmd/validator/wallet"
+	"github.com/OffchainLabs/prysm/v7/cmd/validator/web"
+	"github.com/OffchainLabs/prysm/v7/config/features"
+	"github.com/OffchainLabs/prysm/v7/io/file"
+	"github.com/OffchainLabs/prysm/v7/io/logs"
+	"github.com/OffchainLabs/prysm/v7/monitoring/journald"
+	"github.com/OffchainLabs/prysm/v7/runtime/debug"
+	prefixed "github.com/OffchainLabs/prysm/v7/runtime/logging/logrus-prefixed-formatter"
+	_ "github.com/OffchainLabs/prysm/v7/runtime/maxprocs"
+	"github.com/OffchainLabs/prysm/v7/runtime/tos"
+	"github.com/OffchainLabs/prysm/v7/runtime/version"
+	"github.com/OffchainLabs/prysm/v7/validator/node"
+	joonix "github.com/joonix/log"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+	"github.com/urfave/cli/v2"
+)
+
+var log = logrus.WithField("package", "cmd/validator")
+
+func startNode(ctx *cli.Context) error {
+	// Verify if ToS is accepted.
+	if err := tos.VerifyTosAcceptedOrPrompt(ctx); err != nil {
+		return err
+	}
+
+	validatorClient, err := node.NewValidatorClient(ctx)
+	if err != nil {
+		return err
+	}
+	validatorClient.Start()
+	return nil
+}
+
+var appFlags = []cli.Flag{
+	flags.BeaconRPCProviderFlag,
+	flags.BeaconRESTApiProviderFlag,
+	flags.BeaconRESTApiHeaders,
+	flags.CertFlag,
+	flags.GraffitiFlag,
+	flags.DisablePenaltyRewardLogFlag,
+	flags.EnableRPCFlag,
+	flags.RPCHost,
+	flags.RPCPort,
+	flags.HTTPServerPort,
+	flags.HTTPServerHost,
+	flags.GRPCRetriesFlag,
+	flags.GRPCRetryDelayFlag,
+	flags.GRPCHeadersFlag,
+	flags.HTTPServerCorsDomain,
+	flags.DisableAccountMetricsFlag,
+	flags.MonitoringPortFlag,
+	flags.WalletPasswordFileFlag,
+	flags.WalletDirFlag,
+	flags.GraffitiFileFlag,
+	flags.EnableDistributed,
+	flags.AuthTokenPathFlag,
+	flags.DisableDutiesPolling,
+	flags.MaxHealthChecksFlag,
+	// Consensys' Web3Signer flags
+	flags.Web3SignerURLFlag,
+	flags.Web3SignerPublicValidatorKeysFlag,
+	flags.Web3SignerKeyFileFlag,
+	flags.Web3SignerKeyPollIntervalFlag,
+	flags.SuggestedFeeRecipientFlag,
+	flags.ProposerSettingsURLFlag,
+	flags.ProposerSettingsFlag,
+	flags.EnableBuilderFlag,
+	flags.BuilderGasLimitFlag,
+	flags.ValidatorsRegistrationBatchSizeFlag,
+	flags.EnableStatelessFlag,
+	////////////////////
+	cmd.DisableMonitoringFlag,
+	cmd.MonitoringHostFlag,
+	cmd.MinimalConfigFlag,
+	cmd.E2EConfigFlag,
+	cmd.VerbosityFlag,
+	cmd.LogVModuleFlag,
+	cmd.DataDirFlag,
+	cmd.ClearDB,
+	cmd.ForceClearDB,
+	cmd.EnableTracingFlag,
+	cmd.TracingProcessNameFlag,
+	cmd.TracingEndpointFlag,
+	cmd.TraceSampleFractionFlag,
+	cmd.LogFormat,
+	cmd.DisableLogColor,
+	cmd.LogFileName,
+	cmd.ConfigFileFlag,
+	cmd.ChainConfigFileFlag,
+	cmd.GrpcMaxCallRecvMsgSizeFlag,
+	cmd.ApiTimeoutFlag,
+	debug.PProfFlag,
+	debug.PProfAddrFlag,
+	debug.PProfPortFlag,
+	debug.MemProfileRateFlag,
+	debug.BlockProfileRateFlag,
+	debug.MutexProfileFractionFlag,
+	cmd.AcceptTosFlag,
+	flags.DisableEphemeralLogFile,
+}
+
+func init() {
+	appFlags = cmd.WrapFlags(append(appFlags, features.ValidatorFlags...))
+}
+
+// KnownFlags reports every flag name (including aliases) the embedded
+// validator client accepts, mirroring prysmapp.KnownFlags.
+func KnownFlags() map[string]bool {
+	known := make(map[string]bool)
+	for _, f := range appFlags {
+		for _, name := range f.Names() {
+			known[name] = true
+		}
+	}
+	return known
+}
+
+// Run executes the validator client with the given argument vector (args[0]
+// is the program name, mirroring os.Args). It blocks until the client shuts
+// down, either because the process received SIGINT/SIGTERM (Prysm installs
+// its own handler) or because startup failed.
+func Run(rctx context.Context, args []string) error {
+	app := cli.App{
+		Name:    "validator",
+		Usage:   "Launches an Ethereum validator client that interacts with a beacon chain, starts proposer and attester services, p2p connections, and more.",
+		Version: version.Version(),
+		Action: func(ctx *cli.Context) error {
+			if err := startNode(ctx); err != nil {
+				log.Error(err.Error())
+				return err
+			}
+			return nil
+		},
+		Commands: []*cli.Command{
+			walletcommands.Commands,
+			accountcommands.Commands,
+			slashingprotectioncommands.Commands,
+			dbcommands.Commands,
+			web.Commands,
+			cmd.CompletionCommand("validator"),
+		},
+		Flags:                appFlags,
+		EnableBashCompletion: true,
+		Before: func(ctx *cli.Context) error {
+			// Load flags from config file, if specified.
+			if err := cmd.LoadFlagsFromConfig(ctx, appFlags); err != nil {
+				return err
+			}
+
+			// determine default log verbosity
+			verbosity := ctx.String(cmd.VerbosityFlag.Name)
+			verbosityLevel, err := logrus.ParseLevel(verbosity)
+			if err != nil {
+				return errors.Wrap(err, "failed to parse log verbosity")
+			}
+
+			// determine per package verbosity. if not set, maxLevel will be 0.
+			vmoduleInput := strings.Join(ctx.StringSlice(cmd.LogVModuleFlag.Name), ",")
+			vmodule, maxLevel, err := cmd.ParseVModule(vmoduleInput)
+			if err != nil {
+				return errors.Wrap(err, "failed to parse log vmodule")
+			}
+
+			// set the global logging level and data
+			logs.SetLoggingLevelAndData(verbosityLevel, vmodule, maxLevel, ctx.Bool(flags.DisableEphemeralLogFile.Name))
+
+			logFileName := ctx.String(cmd.LogFileName.Name)
+
+			format := ctx.String(cmd.LogFormat.Name)
+			switch format {
+			case "text":
+				// disabling logrus default output so we can control it via different hooks
+				logrus.SetOutput(io.Discard)
+
+				// create a custom formatter and hook for terminal output
+				formatter := new(prefixed.TextFormatter)
+				formatter.TimestampFormat = "2006-01-02 15:04:05.00"
+				formatter.FullTimestamp = true
+				formatter.ForceFormatting = true
+				formatter.ForceColors = true
+				formatter.DisableColors = ctx.Bool(cmd.DisableLogColor.Name)
+				formatter.VModule = vmodule
+				formatter.BaseVerbosity = verbosityLevel
+
+				logrus.AddHook(&logs.WriterHook{
+					Formatter:     formatter,
+					Writer:        os.Stderr,
+					AllowedLevels: logrus.AllLevels[:max(verbosityLevel, maxLevel)+1],
+					Identifier:    logs.LogTargetUser,
+				})
+			case "fluentd":
+				// disabling logrus default output so we can control it via hooks
+				logrus.SetOutput(io.Discard)
+
+				f := joonix.NewFormatter()
+				if err := joonix.DisableTimestampFormat(f); err != nil {
+					panic(err) // lint:nopanic -- This shouldn't happen, but crashing immediately at startup is OK.
+				}
+
+				logrus.AddHook(&logs.WriterHook{
+					Formatter:     f,
+					Writer:        os.Stderr,
+					AllowedLevels: logrus.AllLevels[:verbosityLevel+1],
+					Identifier:    logs.LogTargetUser,
+				})
+			case "json":
+				// disabling logrus default output so we can control it via hooks
+				logrus.SetOutput(io.Discard)
+				logrus.AddHook(&logs.WriterHook{
+					Formatter: &logrus.JSONFormatter{
+						TimestampFormat: "2006-01-02 15:04:05.00",
+					},
+					Writer:        os.Stderr,
+					AllowedLevels: logrus.AllLevels[:verbosityLevel+1],
+					Identifier:    logs.LogTargetUser,
+				})
+			case "journald":
+				if err := journald.Enable(verbosityLevel); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("unknown log format %s", format)
+			}
+
+			if logFileName != "" {
+				if err := logs.ConfigurePersistentLogging(logFileName, format, verbosityLevel, vmodule); err != nil {
+					log.WithError(err).Error("Failed to configuring logging to disk.")
+				}
+			}
+
+			if !ctx.Bool(flags.DisableEphemeralLogFile.Name) {
+				if err := logs.ConfigureEphemeralLogFile(ctx.String(cmd.DataDirFlag.Name), ctx.App.Name); err != nil {
+					log.WithError(err).Error("Failed to configure debug log file")
+				}
+			}
+
+			// Log Prysm version on startup. After initializing log-file and ephemeral log-file.
+			log.WithFields(logrus.Fields{
+				"version": version.Version(),
+			}).Info("Prysm Validator started (embedded in ethereum-node)")
+
+			// Fix data dir for Windows users.
+			outdatedDataDir := filepath.Join(file.HomeDir(), "AppData", "Roaming", "Eth2Validators")
+			currentDataDir := flags.DefaultValidatorDir()
+			if err := cmd.FixDefaultDataDir(outdatedDataDir, currentDataDir); err != nil {
+				log.WithError(err).Error("Cannot update data directory")
+			}
+
+			if err := debug.Setup(ctx); err != nil {
+				return errors.Wrap(err, "failed to setup debug")
+			}
+
+			if err := features.ValidateNetworkFlags(ctx); err != nil {
+				return errors.Wrap(err, "provided multiple network flags")
+			}
+
+			return cmd.ValidateNoArgs(ctx)
+		},
+	}
+
+	return app.RunContext(rctx, args)
+}
