@@ -30,6 +30,7 @@ import (
 
 	"github.com/satushh/ethereum-node/internal/gethapp"
 	"github.com/satushh/ethereum-node/internal/prysmapp"
+	"github.com/satushh/ethereum-node/internal/valapp"
 )
 
 // bundleVersion is overridden on tag builds by the release workflow via
@@ -175,7 +176,9 @@ func main() {
 		Version: bundleVersion,
 		Commands: append([]*cli.Command{
 			runCommand(),
+			devnetCommand(),
 			beaconCommand(),
+			validatorCommand(),
 			devnetWalletCommand(),
 			versionCommand(),
 		}, testnetcmds.Commands...),
@@ -347,6 +350,17 @@ func beaconCommand() *cli.Command {
 		SkipFlagParsing: true,
 		Action: func(c *cli.Context) error {
 			return prysmapp.Run(c.Context, append([]string{"beacon-chain"}, c.Args().Slice()...))
+		},
+	}
+}
+
+func validatorCommand() *cli.Command {
+	return &cli.Command{
+		Name:            "validator",
+		Usage:           "Invoke the embedded Prysm validator CLI directly (full upstream flag surface; `devnet` re-execs this as its validator process)",
+		SkipFlagParsing: true,
+		Action: func(c *cli.Context) error {
+			return valapp.Run(c.Context, append([]string{"validator"}, c.Args().Slice()...))
 		},
 	}
 }

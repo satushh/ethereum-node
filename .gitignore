@@ -8,3 +8,7 @@ go.work.sum
 
 # devnet state: chain databases, generated genesis, logs, validator wallet
 run/
+
+# default datadirs of `ethereum-node run` / `ethereum-node devnet`
+ethereum-node-data/
+ethereum-node-devnet/
