@@ -1,14 +1,14 @@
 Package: ethereum-node
-Version: 0.2.0
+Version: 0.2.1
 Architecture: arm64
 Maintainer: satushh <sdas@offchainlabs.com>
-Installed-Size: 112653
+Installed-Size: 112334
 Depends: libc6
-Filename: pool/ethereum-node_0.2.0_arm64.deb
-Size: 55054674
-MD5sum: 4169b0f64b8a5ea020fa97cabe4c47eb
-SHA1: c596f504e2c0963e38b52e417cc1c192244c2068
-SHA256: 303836592f5970cd6835cf401ae9bf9c6518f23889b2c1a56d63ea17d6e35f36
+Filename: pool/ethereum-node_0.2.1_arm64.deb
+Size: 54893930
+MD5sum: d82645dc8a4362fe44c85c32a3f22f9b
+SHA1: c66e7eae10bf304c4434b9f9dd8982ed998b85e6
+SHA256: 53936b4bb620428c2d11088b9dbcd6db08a817c1078dd5c09a254417ad1a2a92
 Section: net
 Priority: optional
 Homepage: https://github.com/satushh/ethereum-node
