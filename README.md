@@ -681,7 +681,7 @@ for upstream issues/PRs.
 - An over-long IPC path (~104-char OS limit) warns, then fails with a cryptic
   `bind: invalid argument`; failing fast with the warning's text would help.
 
-**Prysm (develop @ 011d013):**
+**Prysm (re-verified at v7.2.1):**
 
 - `genesis/initialize.go:41` logged `genesis provider failed` *without the
   error*, turning a misconfigured checkpoint URL into an invisible failure;
@@ -692,7 +692,9 @@ for upstream issues/PRs.
   their names don't contain "engine"; an earlier revision of this list
   wrongly claimed they were absent) but observe integer-truncated
   `.Milliseconds()` into buckets flooring at 25 ms — sub-millisecond calls
-  record as zero, and every call under 25 ms is indistinguishable.
+  record as zero, and every call under 25 ms is indistinguishable
+  (v7.2.1: `beacon-chain/execution/engine_jsonrpc.go:126,209,314` +
+  `metrics.go` buckets).
 - `cmd/beacon-chain` is `package main` with config read through `cli.Context`
   across packages — embedding requires copying `main.go`; an importable app
   package (`runtime/beaconapp`) would fix it. This repo is the concrete
@@ -702,5 +704,9 @@ for upstream issues/PRs.
   identical to upstream v1.1.0 and looks Bazel-era.
 - With `--interop-num-validators` deprecated, devnet validators need a full
   wallet ceremony around the interop keys (hence this repo's `devnet-wallet`).
-- Fresh-chain eth1 follow-distance checks log a benign, self-resolving
-  condition at ERROR severity.
+- Fresh-chain eth1 follow-distance checks logged a benign, self-resolving
+  condition at ERROR severity; not reproduced at v7.2.1 (closed). The
+  flavor persists elsewhere: a fresh devnet's first slot logs
+  `could not check if block arrived early ... invalid timestamp` at ERROR
+  twice (forkchoice comparing the EL genesis block's timestamp against
+  slot 0 start), then never again.
