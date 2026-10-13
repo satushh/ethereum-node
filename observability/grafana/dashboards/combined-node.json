@@ -368,12 +368,91 @@
    }
   },
   {
+   "id": 27,
+   "type": "timeseries",
+   "title": "CL: blobs per block (KZG commitments)",
+   "gridPos": {
+    "x": 0,
+    "y": 21,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "expr": "rate(commitment_count_max_21_sum[2m]) / rate(commitment_count_max_21_count[2m])",
+     "legendFormat": "avg blobs/block",
+     "refId": "A"
+    },
+    {
+     "expr": "max_blobs_per_block",
+     "legendFormat": "protocol max",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 28,
+   "type": "timeseries",
+   "title": "CL+EL: blob pipeline (columns stored, blobpool adds)",
+   "gridPos": {
+    "x": 12,
+    "y": 21,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "expr": "rate(data_column_written[2m])",
+     "legendFormat": "CL data columns written/s",
+     "refId": "A"
+    },
+    {
+     "expr": "rate(blobpool_add_valid[2m])",
+     "legendFormat": "EL blobpool valid adds/s",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "EL blobpool valid adds/s"
+      },
+      "properties": [
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
    "id": 20,
    "type": "row",
    "title": "Execution module (geth) details",
    "gridPos": {
     "x": 0,
-    "y": 21,
+    "y": 29,
     "w": 24,
     "h": 1
    },
