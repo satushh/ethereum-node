@@ -43,5 +43,9 @@ DEPOSIT_CHAIN_ID: 1337
 DEPOSIT_NETWORK_ID: 1337
 DEPOSIT_CONTRACT_ADDRESS: 0x4242424242424242424242424242424242424242
 
-# Blob/BPO schedule: none on this devnet (no blob transactions).
+# Blob/BPO schedule: no BPO entries, so Fulu keeps Electra's blob params
+# (target 6, max 9 per block). That matches the EL genesis exactly: prysm's
+# generator hardcodes geth's mainnet-default blobSchedule (osaka target 6,
+# max 9) regardless of what this list says, so custom entries here would
+# desync CL from EL. Blob load comes from the spammer's type-3 transactions.
 BLOB_SCHEDULE: []

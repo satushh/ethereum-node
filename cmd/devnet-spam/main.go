@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/satushh/ethereum-node/internal/devnetspam"
 )
@@ -17,7 +18,8 @@ import (
 func main() {
 	rpcURL := flag.String("rpc", "http://127.0.0.1:8545", "execution JSON-RPC endpoint")
 	rate := flag.Int("rate", 30, "total transactions per second across all accounts")
-	numAccounts := flag.Int("num-accounts", 3, "number of deterministic dev accounts")
+	numAccounts := flag.Int("num-accounts", 3, "number of deterministic dev accounts; the last one is blob-only when blob spam is on")
+	blobPeriod := flag.Duration("blob-period", 3*time.Second, "interval between 1-blob type-3 transactions from the last account (0 disables blob spam)")
 	printAddrs := flag.Bool("print-addrs", false, "print the account addresses and exit (for genesis funding)")
 	flag.Parse()
 
@@ -29,7 +31,7 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if err := devnetspam.Run(ctx, *rpcURL, *rate, *numAccounts); err != nil && ctx.Err() == nil {
+	if err := devnetspam.Run(ctx, *rpcURL, *rate, *numAccounts, *blobPeriod); err != nil && ctx.Err() == nil {
 		fmt.Fprintln(os.Stderr, "devnet-spam:", err)
 		os.Exit(1)
 	}

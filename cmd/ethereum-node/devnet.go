@@ -24,7 +24,8 @@ import (
 )
 
 // The spam accounts and funding mirror scripts/devnet-up.sh: 3 deterministic
-// dev accounts at 10^6 ether each, 1 gwei starting base fee.
+// dev accounts at 10^6 ether each (the last one sends only blob txs; geth's
+// subpools reserve a sender exclusively), 1 gwei starting base fee.
 const (
 	devnetSpamAccounts = 3
 	devnetSpamBalance  = "0xd3c21bcecceda1000000"
@@ -52,6 +53,11 @@ var (
 		Usage: "Transactions per second from the prefunded dev accounts (0 disables the spammer)",
 		Value: 30,
 	}
+	spamBlobPeriodFlag = &cli.DurationFlag{
+		Name:  "spam.blob-period",
+		Usage: "Interval between 1-blob type-3 transactions from a dedicated dev account (0 disables blob spam)",
+		Value: 3 * time.Second,
+	}
 )
 
 func devnetCommand() *cli.Command {
@@ -61,7 +67,8 @@ func devnetCommand() *cli.Command {
 			"a tx spammer, and (with docker) Grafana dashboards. One command, Ctrl-C stops everything",
 		Flags: []cli.Flag{
 			devnetDatadirFlag, genesisDelayFlag, numValidatorsFlag, spamRateFlag,
-			observabilityFlag, engineTransportFlag, verbosityFlag, metricsFlag,
+			spamBlobPeriodFlag, observabilityFlag, engineTransportFlag, verbosityFlag,
+			metricsFlag,
 		},
 		Action: runDevnet,
 	}
@@ -182,7 +189,8 @@ func runDevnet(c *cli.Context) error {
 		if rate := c.Int(spamRateFlag.Name); rate > 0 {
 			if waitHTTP(orchCtx, "http://127.0.0.1:8545", 60*time.Second) {
 				go func() {
-					if err := devnetspam.Run(orchCtx, "http://127.0.0.1:8545", rate, devnetSpamAccounts); err != nil && orchCtx.Err() == nil {
+					if err := devnetspam.Run(orchCtx, "http://127.0.0.1:8545", rate, devnetSpamAccounts,
+						c.Duration(spamBlobPeriodFlag.Name)); err != nil && orchCtx.Err() == nil {
 						fmt.Fprintf(os.Stderr, "devnet: spammer stopped: %v\n", err)
 					}
 				}()

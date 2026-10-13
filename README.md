@@ -28,8 +28,9 @@ curl -s localhost:8545 -X POST -H 'Content-Type: application/json' \
 curl -s localhost:3500/eth/v1/beacon/states/head/finality_checkpoints
 ```
 
-First blocks in ~1 minute, carrying real transactions (a small spammer runs
-from genesis-funded dev accounts; `NO_SPAM=1` disables); finalization at ~13
+First blocks in ~1 minute, carrying real transactions and blobs (a small
+spammer sends plain transfers plus a 1-blob type-3 tx every 3s from
+genesis-funded dev accounts; `NO_SPAM=1` disables); finalization at ~13
 minutes. Stop everything with `scripts/devnet-up.sh down`. Laptop note:
 system sleep freezes the devnet — keep the machine awake (`caffeinate -is`).
 
@@ -66,7 +67,8 @@ journalctl -u ethereum-node -f
 
 Upgrades ride `apt upgrade`. The package also carries the full local
 devnet: `ethereum-node devnet` boots the node, 64 interop validators, a tx
-spammer, and (when docker is present) the Grafana dashboards at
+spammer (plain + blob transactions), and (when docker is present) the
+Grafana dashboards at
 `http://127.0.0.1:3001`, from one command; Ctrl-C tears all of it down.
 Details: `packaging/README.md`.
 
@@ -132,7 +134,7 @@ CL genesis state; chain ID checked via `eth_chainId` on connect) —
 `ethereum-node testnet generate-genesis` (prysmctl's generator, mounted
 unchanged) emits a matching pair by construction.
 
-The entire integration (~2,900 lines; ~1,950 hand-written once the two
+The entire integration (~3,050 lines; ~2,050 hand-written once the two
 copied files and the mostly-generated go.mod are excluded):
 
 | Piece | Lines | Nature |
@@ -141,7 +143,7 @@ copied files and the mostly-generated go.mod are excluded):
 | `internal/valapp/valapp.go` | ~290 | near-verbatim copy of prysm's validator `main.go` (same reason; `devnet` re-execs it) |
 | `internal/gethapp/gethapp.go` | ~290 | thin wrapper over geth's public embedding API |
 | `cmd/ethereum-node/` | ~1,050 | supervisor CLI, config file, devnet orchestrator, wallet |
-| `cmd/devnet-spam/` + `internal/devnetspam/` + `devnet/` + `scripts/` | ~590 | devnet fixtures and tooling |
+| `cmd/devnet-spam/` + `internal/devnetspam/` + `devnet/` + `scripts/` | ~720 | devnet fixtures and tooling |
 | `go.mod` | ~270 | pinned versions + 1 replace mirrored from prysm's go.mod |
 
 The upstream changes that would help most are small and listed in
@@ -314,6 +316,17 @@ funding must happen *before* the CL state is computed because that state
 embeds the EL genesis hash; editing genesis.json afterwards desyncs the
 halves and no block can build.
 
+Blob load is on by default: the last spam account sends a 1-blob type-3
+transaction every 3s (about 4 blobs per block against the chain's target
+6 / max 9), with version-1 cell-proof sidecars as Osaka requires; that
+account sends nothing else, because geth's subpools reserve a sender
+exclusively. On a single node this exercises the proposal-side blob path
+end to end: `getPayloadV5`'s blobs bundle, data-column construction and
+storage (watch `run/data/beacon/data-columns/` fill), and the beacon API
+serving the blobs back (`/eth/v1/beacon/blobs/head`, reconstructed from
+the stored columns). The gossip-side `engine_getBlobsV2/V3` recovery path
+needs peers, so on this devnet its metrics legitimately read zero.
+
 ## Run on a public testnet (Hoodi)
 
 ```sh
@@ -473,7 +486,9 @@ reproducible builds, container images, and the `doctor` endpoint remain.
    globals (Prysm's trace-verbosity path overwrites the geth log handler).
    Buys coherent observability and no last-writer-wins config bugs.
 5. **In-memory blob delivery** — `getBlobsV2/V3` by reference instead of
-   hex-JSON; the largest per-slot byte movement disappears.
+   hex-JSON; the largest per-slot byte movement disappears. The devnet's
+   default blob spam gives the `getPayloadV5` blobs-bundle leg a measurable
+   baseline; the `getBlobs*` leg itself only fires with peers.
 6. **Payload storage dedup** — stop storing every payload twice; dedicated
    DBs stay, the EL exposes a read API instead (schema unification would
    couple the teams' migrations — the coupling this project exists to
@@ -704,6 +719,14 @@ for upstream issues/PRs.
   identical to upstream v1.1.0 and looks Bazel-era.
 - With `--interop-num-validators` deprecated, devnet validators need a full
   wallet ceremony around the interop keys (hence this repo's `devnet-wallet`).
+- `prysmctl testnet generate-genesis` hardcodes the emitted geth genesis's
+  `blobSchedule` to geth's mainnet defaults (`runtime/interop/genesis.go:218`);
+  the consensus `BLOB_SCHEDULE` only shifts `bpo1Time`/`bpo2Time`, and only
+  for entries raising max blobs above Electra's 9
+  (`runtime/interop/genesis.go:137`). Any custom CL schedule therefore
+  silently desyncs the CL and EL blob limits: harmless for mainnet-shaped
+  devnets (this repo's empty schedule inherits a matching 6/9 on both
+  sides), a trap for anything else.
 - Fresh-chain eth1 follow-distance checks logged a benign, self-resolving
   condition at ERROR severity; not reproduced at v7.2.1 (closed). The
   flavor persists elsewhere: a fresh devnet's first slot logs

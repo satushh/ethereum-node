@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Boot a fresh single-node devnet with the combined ethereum-node binary, a
 # separate Prysm validator client (64 interop validators), and a transaction
-# spammer so blocks are never empty (NO_SPAM=1 disables).
+# spammer (plain + blob transactions) so blocks are never empty (NO_SPAM=1
+# disables).
 #
 # Usage: scripts/devnet-up.sh [genesis-delay-seconds]
 #        scripts/devnet-up.sh down     # stop node + validator + spammer + dashboards
@@ -208,7 +209,7 @@ if ! alive "$(cat run/validator.pid)"; then
 fi
 
 if [ "${NO_SPAM:-0}" != "1" ]; then
-    echo ">> starting tx spammer (${SPAM_RATE} tx/s from ${SPAM_ACCOUNTS} accounts; NO_SPAM=1 disables)"
+    echo ">> starting tx spammer (${SPAM_RATE} tx/s + a blob tx every 3s from ${SPAM_ACCOUNTS} accounts; NO_SPAM=1 disables)"
     # started immediately — geth's RPC already passed the readiness gate,
     # and pre-genesis transactions simply pool up for the first blocks. No
     # delay wrapper means the recorded pid is the spammer, always.
