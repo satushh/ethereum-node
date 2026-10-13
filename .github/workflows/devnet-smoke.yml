@@ -48,6 +48,24 @@ jobs:
           echo "latest block txs: $TXS"
           test "$TXS" -gt 0
 
+      - name: Assert blocks carry blobs, served back by the CL
+        run: |
+          set -euo pipefail
+          blobgas() { curl -s -X POST -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["latest", false],"id":1}' \
+            http://127.0.0.1:8545 | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["result"]["blobGasUsed"],16))'; }
+          clblobs() { curl -s http://127.0.0.1:3500/eth/v1/beacon/blobs/head \
+            | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data") or []))'; }
+          BG=0; BLOBS=0
+          for _ in $(seq 1 30); do
+            BG=$(blobgas); BLOBS=$(clblobs)
+            [ "$BG" -gt 0 ] && [ "$BLOBS" -gt 0 ] && break
+            sleep 4
+          done
+          echo "latest block blobGasUsed: $BG; blobs served for head: $BLOBS"
+          test "$BG" -gt 0        # EL included type-3 txs
+          test "$BLOBS" -gt 0     # CL reconstructed blobs from stored data columns
+
       - name: Tear down
         run: scripts/devnet-up.sh down
 
