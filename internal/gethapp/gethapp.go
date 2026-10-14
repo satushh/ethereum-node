@@ -102,7 +102,8 @@ func decodeSettings(chunks []string) (*gethTomlConfig, error) {
 
 // Node is a running embedded geth instance.
 type Node struct {
-	stack *node.Node
+	stack     *node.Node
+	engineAPI *catalyst.ConsensusAPI
 }
 
 // Start builds and starts the geth node stack: chain database, networking,
@@ -179,15 +180,26 @@ func Start(cfg Config) (*Node, error) {
 
 	backend, ethService := utils.RegisterEthService(stack, &ethCfg)
 	utils.RegisterFilterAPI(stack, backend, &ethCfg)
-	if err := catalyst.Register(stack, ethService); err != nil {
-		stack.Close()
-		return nil, fmt.Errorf("register engine API: %w", err)
-	}
+	// Register the engine API like catalyst.Register does, but keep the
+	// ConsensusAPI instance: the typed engine transport must call the SAME
+	// instance that serves the JSON path (payload IDs minted by
+	// forkchoiceUpdated live in a per-instance queue, and a second instance
+	// would steal the downloader's bad-block callback). Register's only
+	// other addition is an unexported testing namespace, not needed here.
+	engineAPI := catalyst.NewConsensusAPI(ethService)
+	stack.RegisterAPIs([]rpc.API{{Namespace: "engine", Service: engineAPI, Authenticated: true}})
 	if err := stack.Start(); err != nil {
 		// node.Start closes the stack itself on failure; no second Close.
 		return nil, fmt.Errorf("start geth stack: %w", err)
 	}
-	return &Node{stack: stack}, nil
+	return &Node{stack: stack, engineAPI: engineAPI}, nil
+}
+
+// EngineAPI returns the catalyst engine-API implementation registered on the
+// node: the same instance that serves engine JSON-RPC, so payload state is
+// shared across transports.
+func (n *Node) EngineAPI() *catalyst.ConsensusAPI {
+	return n.engineAPI
 }
 
 // IPCEndpoint returns the path of the IPC socket serving all APIs including
