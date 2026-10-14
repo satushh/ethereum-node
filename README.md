@@ -213,6 +213,8 @@ matters next:
          engine_client.go:53) directly on          against the JSON path by
          catalyst.ConsensusAPI                     running both in tests
          (go-ethereum/eth/catalyst/api.go:90)
+         first cut on this branch: getPayload/getBlobs via override seam
+         (--engine-transport=typed; numbers in Prysm PR 5)
 ```
 
 | Redundancy | Two processes | This binary today | Possible in one process |
@@ -480,15 +482,26 @@ reproducible builds, container images, and the `doctor` endpoint remain.
    merged upstream (prysm#17334, `execution.WithRPCClientDialer`) and the
    first rung is merged into main (`--engine-transport=inproc`); the
    measured residual — JSON codec + rpc dispatch, 0.5–1.7 ms per call — is
-   what the typed rung removes.
+   what the typed rung removes. The typed rung's first cut lives on this
+   branch: `--engine-transport=typed` overrides `getPayload` and
+   `getBlobs` with direct catalyst calls through a second prysm seam
+   (sibling branch `engine-override-seam`; proposal and numbers in Prysm
+   PR 5 below). Under blob load the override removed ~97% of getPayload
+   latency.
 4. **Root-owned process globals** — one logging setup, one OTel provider, one
    Prometheus registry/endpoint, one pprof. Today the modules can fight over
    globals (Prysm's trace-verbosity path overwrites the geth log handler).
    Buys coherent observability and no last-writer-wins config bugs.
 5. **In-memory blob delivery** — `getBlobsV2/V3` by reference instead of
-   hex-JSON; the largest per-slot byte movement disappears. The devnet's
-   default blob spam gives the `getPayloadV5` blobs-bundle leg a measurable
-   baseline; the `getBlobs*` leg itself only fires with peers.
+   hex-JSON; the largest per-slot byte movement disappears. Implemented
+   for the proposal leg on this branch: `--engine-transport=typed` hands
+   the `getPayloadV5` blobs bundle over by reference (blobs, commitments,
+   and transactions alias geth-owned memory; zero serialization), which
+   under the devnet's default ~4 blobs/block collapsed getPayload from
+   16.1 ms to 0.39 ms mean (Prysm PR 5 below has the full table). The
+   `getBlobsV2/V3` override is wired through the same seam but only fires
+   with peers (gossip-recovery leg), so its win is measurable only on a
+   public network.
 6. **Payload storage dedup** — stop storing every payload twice; dedicated
    DBs stay, the EL exposes a read API instead (schema unification would
    couple the teams' migrations — the coupling this project exists to
@@ -557,6 +570,48 @@ observations):
    two-line change, proven during the #17334 A/B (the fix ships in the
    `pr-17334-ab` measurement branch), where truncation would have erased
    the entire measured effect.
+5. **In-process overrides for `getPayload` and `getBlobs`** (the #17334
+   follow-up: that seam removed the socket, this one removes the
+   serialization). Two functional options on the execution service,
+   `WithGetPayloadOverride` and `WithGetBlobsOverride`, let an embedder
+   serve `engine_getPayloadVX` and `engine_getBlobsV2/V3` as typed
+   in-process calls: the getPayload hook populates the exact proto that
+   `getPayloadMethodAndMessage` selects, placed between the deadline setup
+   and the `CallContext` it replaces, so fork dispatch, response wrapping,
+   the latency histogram, span, and timeout are all unchanged (~25 lines,
+   3 files, no signature or interface changes). Written on sibling branch
+   `engine-override-seam` (v7.2.1 base) and consumed here on branch
+   `engine-typed-ab` (`--engine-transport=typed`,
+   `internal/enginebridge`): prysm's protos are filled field-for-field the
+   way its JSON decoders would, with blobs, commitments, and transactions
+   aliased by reference. Correctness is differential-tested every slot by
+   construction: the converted payload re-enters geth via `newPayload`
+   (still JSON), where the block hash is recomputed, and the blob
+   commitments must survive prysm's consensus and data-availability
+   checks. Measured on the devnet A/B (same binary, one flag flipped, 90
+   measured slots per leg after 10-slot warmup, default load: 30 tx/s
+   plain + ~4 blobs/block, every leg 90/90 proposals and 4.0 blobs/block;
+   sleep-tainted legs discarded and rerun, awake-coverage verified from
+   sampler counts):
+
+   | engine call, client-observed | ipc JSON | in-proc JSON | typed | typed vs in-proc |
+   |---|---|---|---|---|
+   | `engine_getPayload` mean | 18.21 ms | 16.10 ms | **0.39 ms** | −97.6% |
+   | `engine_getPayload` p50 | 17.67 ms | 17.50 ms | 0.23 ms | −98.7% |
+   | `engine_getPayload` p99 | 38.75 ms | 24.85 ms | 1.15 ms | −95.4% |
+   | `engine_newPayload` mean | 7.44 ms | 7.28 ms | 6.90 ms | control, unchanged path |
+   | `engine_forkchoiceUpdated` mean | 1.67 ms | 1.25 ms | 1.21 ms | control, unchanged path |
+
+   Reading: against the blobless #17334 table above (getPayload 2.3 to
+   3.0 ms), ~4 blobs/block put getPayload at 16 to 18 ms on both JSON
+   transports; roughly 1.07 MiB of hex JSON per response (4 blobs + 512
+   cell proofs, hex-doubled) costs ~14 ms per proposal in codec alone,
+   and the transport swap recovers only ~12% of it. The typed override
+   deletes the serialization and the copies outright; the two untouched
+   calls moving within noise on the same legs is the sanity check that
+   nothing else changed. `getBlobsV2/V3` rides the same seam but only
+   fires with peers, so its (larger, multi-response) win needs a public
+   network to measure.
 
 **Geth:**
 
