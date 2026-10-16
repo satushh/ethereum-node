@@ -28,8 +28,9 @@ curl -s localhost:8545 -X POST -H 'Content-Type: application/json' \
 curl -s localhost:3500/eth/v1/beacon/states/head/finality_checkpoints
 ```
 
-First blocks in ~1 minute, carrying real transactions (a small spammer runs
-from genesis-funded dev accounts; `NO_SPAM=1` disables); finalization at ~13
+First blocks in ~1 minute, carrying real transactions and blobs (a small
+spammer sends plain transfers plus a 1-blob type-3 tx every 3s from
+genesis-funded dev accounts; `NO_SPAM=1` disables); finalization at ~13
 minutes. Stop everything with `scripts/devnet-up.sh down`. Laptop note:
 system sleep freezes the devnet — keep the machine awake (`caffeinate -is`).
 
@@ -66,7 +67,8 @@ journalctl -u ethereum-node -f
 
 Upgrades ride `apt upgrade`. The package also carries the full local
 devnet: `ethereum-node devnet` boots the node, 64 interop validators, a tx
-spammer, and (when docker is present) the Grafana dashboards at
+spammer (plain + blob transactions), and (when docker is present) the
+Grafana dashboards at
 `http://127.0.0.1:3001`, from one command; Ctrl-C tears all of it down.
 Details: `packaging/README.md`.
 
@@ -132,7 +134,7 @@ CL genesis state; chain ID checked via `eth_chainId` on connect) —
 `ethereum-node testnet generate-genesis` (prysmctl's generator, mounted
 unchanged) emits a matching pair by construction.
 
-The entire integration (~2,900 lines; ~1,950 hand-written once the two
+The entire integration (~3,050 lines; ~2,050 hand-written once the two
 copied files and the mostly-generated go.mod are excluded):
 
 | Piece | Lines | Nature |
@@ -141,7 +143,7 @@ copied files and the mostly-generated go.mod are excluded):
 | `internal/valapp/valapp.go` | ~290 | near-verbatim copy of prysm's validator `main.go` (same reason; `devnet` re-execs it) |
 | `internal/gethapp/gethapp.go` | ~290 | thin wrapper over geth's public embedding API |
 | `cmd/ethereum-node/` | ~1,050 | supervisor CLI, config file, devnet orchestrator, wallet |
-| `cmd/devnet-spam/` + `internal/devnetspam/` + `devnet/` + `scripts/` | ~590 | devnet fixtures and tooling |
+| `cmd/devnet-spam/` + `internal/devnetspam/` + `devnet/` + `scripts/` | ~720 | devnet fixtures and tooling |
 | `go.mod` | ~270 | pinned versions + 1 replace mirrored from prysm's go.mod |
 
 The upstream changes that would help most are small and listed in
@@ -211,6 +213,8 @@ matters next:
          engine_client.go:53) directly on          against the JSON path by
          catalyst.ConsensusAPI                     running both in tests
          (go-ethereum/eth/catalyst/api.go:90)
+         first cut on this branch: getPayload/getBlobs via override seam
+         (--engine-transport=typed; numbers in Prysm PR 5)
 ```
 
 | Redundancy | Two processes | This binary today | Possible in one process |
@@ -313,6 +317,17 @@ The script funds 3 spam accounts in genesis via **two-pass generation**
 funding must happen *before* the CL state is computed because that state
 embeds the EL genesis hash; editing genesis.json afterwards desyncs the
 halves and no block can build.
+
+Blob load is on by default: the last spam account sends a 1-blob type-3
+transaction every 3s (about 4 blobs per block against the chain's target
+6 / max 9), with version-1 cell-proof sidecars as Osaka requires; that
+account sends nothing else, because geth's subpools reserve a sender
+exclusively. On a single node this exercises the proposal-side blob path
+end to end: `getPayloadV5`'s blobs bundle, data-column construction and
+storage (watch `run/data/beacon/data-columns/` fill), and the beacon API
+serving the blobs back (`/eth/v1/beacon/blobs/head`, reconstructed from
+the stored columns). The gossip-side `engine_getBlobsV2/V3` recovery path
+needs peers, so on this devnet its metrics legitimately read zero.
 
 ## Run on a public testnet (Hoodi)
 
@@ -467,13 +482,26 @@ reproducible builds, container images, and the `doctor` endpoint remain.
    merged upstream (prysm#17334, `execution.WithRPCClientDialer`) and the
    first rung is merged into main (`--engine-transport=inproc`); the
    measured residual — JSON codec + rpc dispatch, 0.5–1.7 ms per call — is
-   what the typed rung removes.
+   what the typed rung removes. The typed rung's first cut lives on this
+   branch: `--engine-transport=typed` overrides `getPayload` and
+   `getBlobs` with direct catalyst calls through a second prysm seam
+   (sibling branch `engine-override-seam`; proposal and numbers in Prysm
+   PR 5 below). Under blob load the override removed ~97% of getPayload
+   latency.
 4. **Root-owned process globals** — one logging setup, one OTel provider, one
    Prometheus registry/endpoint, one pprof. Today the modules can fight over
    globals (Prysm's trace-verbosity path overwrites the geth log handler).
    Buys coherent observability and no last-writer-wins config bugs.
 5. **In-memory blob delivery** — `getBlobsV2/V3` by reference instead of
-   hex-JSON; the largest per-slot byte movement disappears.
+   hex-JSON; the largest per-slot byte movement disappears. Implemented
+   for the proposal leg on this branch: `--engine-transport=typed` hands
+   the `getPayloadV5` blobs bundle over by reference (blobs, commitments,
+   and transactions alias geth-owned memory; zero serialization), which
+   under the devnet's default ~4 blobs/block collapsed getPayload from
+   16.1 ms to 0.39 ms mean (Prysm PR 5 below has the full table). The
+   `getBlobsV2/V3` override is wired through the same seam but only fires
+   with peers (gossip-recovery leg), so its win is measurable only on a
+   public network.
 6. **Payload storage dedup** — stop storing every payload twice; dedicated
    DBs stay, the EL exposes a read API instead (schema unification would
    couple the teams' migrations — the coupling this project exists to
@@ -542,6 +570,48 @@ observations):
    two-line change, proven during the #17334 A/B (the fix ships in the
    `pr-17334-ab` measurement branch), where truncation would have erased
    the entire measured effect.
+5. **In-process overrides for `getPayload` and `getBlobs`** (the #17334
+   follow-up: that seam removed the socket, this one removes the
+   serialization). Two functional options on the execution service,
+   `WithGetPayloadOverride` and `WithGetBlobsOverride`, let an embedder
+   serve `engine_getPayloadVX` and `engine_getBlobsV2/V3` as typed
+   in-process calls: the getPayload hook populates the exact proto that
+   `getPayloadMethodAndMessage` selects, placed between the deadline setup
+   and the `CallContext` it replaces, so fork dispatch, response wrapping,
+   the latency histogram, span, and timeout are all unchanged (~25 lines,
+   3 files, no signature or interface changes). Written on sibling branch
+   `engine-override-seam` (v7.2.1 base) and consumed here on branch
+   `engine-typed-ab` (`--engine-transport=typed`,
+   `internal/enginebridge`): prysm's protos are filled field-for-field the
+   way its JSON decoders would, with blobs, commitments, and transactions
+   aliased by reference. Correctness is differential-tested every slot by
+   construction: the converted payload re-enters geth via `newPayload`
+   (still JSON), where the block hash is recomputed, and the blob
+   commitments must survive prysm's consensus and data-availability
+   checks. Measured on the devnet A/B (same binary, one flag flipped, 90
+   measured slots per leg after 10-slot warmup, default load: 30 tx/s
+   plain + ~4 blobs/block, every leg 90/90 proposals and 4.0 blobs/block;
+   sleep-tainted legs discarded and rerun, awake-coverage verified from
+   sampler counts):
+
+   | engine call, client-observed | ipc JSON | in-proc JSON | typed | typed vs in-proc |
+   |---|---|---|---|---|
+   | `engine_getPayload` mean | 18.21 ms | 16.10 ms | **0.39 ms** | −97.6% |
+   | `engine_getPayload` p50 | 17.67 ms | 17.50 ms | 0.23 ms | −98.7% |
+   | `engine_getPayload` p99 | 38.75 ms | 24.85 ms | 1.15 ms | −95.4% |
+   | `engine_newPayload` mean | 7.44 ms | 7.28 ms | 6.90 ms | control, unchanged path |
+   | `engine_forkchoiceUpdated` mean | 1.67 ms | 1.25 ms | 1.21 ms | control, unchanged path |
+
+   Reading: against the blobless #17334 table above (getPayload 2.3 to
+   3.0 ms), ~4 blobs/block put getPayload at 16 to 18 ms on both JSON
+   transports; roughly 1.07 MiB of hex JSON per response (4 blobs + 512
+   cell proofs, hex-doubled) costs ~14 ms per proposal in codec alone,
+   and the transport swap recovers only ~12% of it. The typed override
+   deletes the serialization and the copies outright; the two untouched
+   calls moving within noise on the same legs is the sanity check that
+   nothing else changed. `getBlobsV2/V3` rides the same seam but only
+   fires with peers, so its (larger, multi-response) win needs a public
+   network to measure.
 
 **Geth:**
 
@@ -704,6 +774,14 @@ for upstream issues/PRs.
   identical to upstream v1.1.0 and looks Bazel-era.
 - With `--interop-num-validators` deprecated, devnet validators need a full
   wallet ceremony around the interop keys (hence this repo's `devnet-wallet`).
+- `prysmctl testnet generate-genesis` hardcodes the emitted geth genesis's
+  `blobSchedule` to geth's mainnet defaults (`runtime/interop/genesis.go:218`);
+  the consensus `BLOB_SCHEDULE` only shifts `bpo1Time`/`bpo2Time`, and only
+  for entries raising max blobs above Electra's 9
+  (`runtime/interop/genesis.go:137`). Any custom CL schedule therefore
+  silently desyncs the CL and EL blob limits: harmless for mainnet-shaped
+  devnets (this repo's empty schedule inherits a matching 6/9 on both
+  sides), a trap for anything else.
 - Fresh-chain eth1 follow-distance checks logged a benign, self-resolving
   condition at ERROR severity; not reproduced at v7.2.1 (closed). The
   flavor persists elsewhere: a fresh devnet's first slot logs

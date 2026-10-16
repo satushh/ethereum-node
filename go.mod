@@ -22,12 +22,14 @@ replace github.com/json-iterator/go => github.com/prestonvanloon/go v1.1.7-0.201
 require (
 	github.com/OffchainLabs/prysm/v7 v7.2.1
 	github.com/ethereum/go-ethereum v1.17.4
+	github.com/holiman/uint256 v1.3.2
 	github.com/ipfs/go-log/v2 v2.9.2
 	github.com/joonix/log v0.0.0-20260428191936-c4199ac32b4a
 	github.com/naoina/toml v0.1.2-0.20170918210437-9fafd6967416
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.4
 	github.com/urfave/cli/v2 v2.27.7
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -110,7 +112,6 @@ require (
 	github.com/herumi/bls-eth-go-binary v1.31.0 // indirect
 	github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
-	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20200424224625-be1b05b0b279 // indirect
 	github.com/influxdata/influxdb-client-go/v2 v2.4.0 // indirect
@@ -257,7 +258,6 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.81.1 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

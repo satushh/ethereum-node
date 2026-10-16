@@ -28,6 +28,7 @@ import (
 	gethversion "github.com/ethereum/go-ethereum/version"
 	"github.com/urfave/cli/v2"
 
+	"github.com/satushh/ethereum-node/internal/enginebridge"
 	"github.com/satushh/ethereum-node/internal/gethapp"
 	"github.com/satushh/ethereum-node/internal/prysmapp"
 	"github.com/satushh/ethereum-node/internal/valapp"
@@ -115,7 +116,7 @@ var (
 	}
 	engineTransportFlag = &cli.StringFlag{
 		Name:  "engine-transport",
-		Usage: "Engine API transport between the embedded modules: ipc (geth's in-datadir socket) or inproc (direct in-process client, no socket; needs the prysm injection seam)",
+		Usage: "Engine API transport between the embedded modules: ipc (geth's in-datadir socket), inproc (direct in-process client, no socket), or typed (inproc plus getPayload/getBlobs as Go calls, no JSON; needs the sibling prysm override seam)",
 		Value: "ipc",
 	}
 	p2pListenFlag = &cli.StringFlag{
@@ -241,8 +242,10 @@ func runNode(c *cli.Context) (retErr error) {
 		return fmt.Errorf("--%s and --%s are mutually exclusive", networkFlag.Name, elGenesisFlag.Name)
 	}
 	engineTransport := c.String(engineTransportFlag.Name)
-	if engineTransport != "ipc" && engineTransport != "inproc" {
-		return fmt.Errorf("--%s must be \"ipc\" or \"inproc\", got %q", engineTransportFlag.Name, engineTransport)
+	switch engineTransport {
+	case "ipc", "inproc", "typed":
+	default:
+		return fmt.Errorf("--%s must be \"ipc\", \"inproc\", or \"typed\", got %q", engineTransportFlag.Name, engineTransport)
 	}
 	p2pListen := c.String(p2pListenFlag.Name)
 	if network != "" && !c.IsSet(p2pListenFlag.Name) {
@@ -279,9 +282,12 @@ func runNode(c *cli.Context) (retErr error) {
 			retErr = errors.Join(retErr, fmt.Errorf("execution module shutdown: %w", err))
 		}
 	}()
-	if engineTransport == "inproc" {
+	switch engineTransport {
+	case "typed":
+		fmt.Printf("  engine API: typed in-process (getPayload/getBlobs as Go calls, no JSON; rest in-process JSON)\n")
+	case "inproc":
 		fmt.Printf("  engine API: in-process (direct attach to geth's RPC handler, no socket)\n")
-	} else {
+	default:
 		fmt.Printf("  engine API: %s (in-datadir IPC, no JWT needed)\n", gethNode.IPCEndpoint())
 	}
 
@@ -331,11 +337,20 @@ func runNode(c *cli.Context) (retErr error) {
 	// With the default ipc transport Prysm dials the endpoint passed above;
 	// with inproc it receives a dialer handing out direct in-process clients
 	// instead. The endpoint argument stays either way — the injected dialer
-	// takes precedence inside the execution service.
+	// takes precedence inside the execution service. The typed transport
+	// layers on inproc: getPayload and getBlobs become direct Go calls on
+	// geth's catalyst API (no JSON at all), everything else keeps the
+	// in-process JSON path.
 	var execOpts []beaconexecution.Option
-	if engineTransport == "inproc" {
+	if engineTransport == "inproc" || engineTransport == "typed" {
 		execOpts = append(execOpts, beaconexecution.WithRPCClientDialer(
 			func(context.Context) (*gethrpc.Client, error) { return gethNode.Attach(), nil }))
+	}
+	if engineTransport == "typed" {
+		engineAPI := gethNode.EngineAPI()
+		execOpts = append(execOpts,
+			beaconexecution.WithGetPayloadOverride(enginebridge.GetPayloadOverride(engineAPI)),
+			beaconexecution.WithGetBlobsOverride(enginebridge.GetBlobsOverride(engineAPI)))
 	}
 
 	// Blocks until shutdown; Prysm handles SIGINT/SIGTERM itself, then the
